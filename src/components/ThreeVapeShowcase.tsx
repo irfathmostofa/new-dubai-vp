@@ -133,16 +133,16 @@ export function ThreeVapeShowcase() {
     const height = mount.clientHeight || 380;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x09090b);
-    scene.fog = new THREE.FogExp2(0x09090b, 0.08);
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
     camera.position.set(0, 0.25, 4.9);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
+      alpha: true,
       powerPreference: 'high-performance',
     });
+    renderer.setClearColor(0x000000, 0);
     renderer.setSize(width, height);
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -570,7 +570,7 @@ export function ThreeVapeShowcase() {
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       aria-label="3D Smart Vape Hardware Scroll Animation"
-      className="relative flex h-full min-h-[280px] sm:min-h-[340px] w-full overflow-hidden border border-zinc-800 bg-zinc-950"
+      className="relative flex h-full min-h-[280px] sm:min-h-[340px] w-full overflow-hidden"
     >
       <div
         ref={canvasMountRef}

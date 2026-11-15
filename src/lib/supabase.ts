@@ -1,15 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const rawAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-/** False when the .env values are missing: the storefront then runs on built-in demo data. */
-export const isSupabaseConfigured = Boolean(url && anonKey);
+function hasValidSupabaseEnv(candidateUrl: string, candidateKey: string): boolean {
+  if (!candidateUrl || !candidateKey) return false;
+  const lowerUrl = candidateUrl.toLowerCase();
+  const lowerKey = candidateKey.toLowerCase();
+  if (
+    lowerUrl.includes('your-project-ref') ||
+    lowerUrl.includes('placeholder') ||
+    lowerUrl.includes('example.com') ||
+    lowerKey.includes('your-anon-key') ||
+    lowerKey.includes('placeholder') ||
+    lowerKey === 'supabase-not-configured'
+  ) {
+    return false;
+  }
+  return lowerUrl.startsWith('https://') || lowerUrl.startsWith('http://');
+}
+
+/** False when the .env values are missing or placeholders: the storefront then runs on built-in demo data. */
+export const isSupabaseConfigured = hasValidSupabaseEnv(rawUrl, rawAnonKey);
+const url = isSupabaseConfigured ? rawUrl : '';
+const anonKey = isSupabaseConfigured ? rawAnonKey : '';
 
 if (!isSupabaseConfigured && typeof console !== 'undefined') {
-  console.warn(
-    '[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set. ' +
-      'Copy .env.example to .env and fill them in. Running on local demo data.'
+  console.info(
+    '[supabase] Running on built-in UAE demo catalog & seeded order state (connect VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY for live cloud persistence).'
   );
 }
 

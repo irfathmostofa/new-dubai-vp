@@ -443,3 +443,20 @@ test('session-linked Order History helpers filter, merge, and advance real-time 
   assert.equal(ticked[0].status, 'delivered');
   assert.equal(ticked[0].timeline?.find((s) => s.current)?.status, 'delivered');
 });
+
+test('buildCustomerDemoUser constructs deterministic customer profile for Tariq or custom email', async () => {
+  const { buildCustomerDemoUser } = await import('./storeLogic');
+  const defaultDemo = buildCustomerDemoUser();
+  assert.equal(defaultDemo.email, 'tariq.almaktoum@dubai.ae');
+  assert.equal(defaultDemo.displayName, 'Tariq Al Maktoum');
+  assert.equal(defaultDemo.role, 'customer');
+
+  const customUser = buildCustomerDemoUser({
+    email: 'rashid.khalifa@abudhabi.ae',
+    phone: '+971 52 900 1122',
+    emirate: 'Abu Dhabi',
+  });
+  assert.equal(customUser.email, 'rashid.khalifa@abudhabi.ae');
+  assert.equal(customUser.displayName, 'Rashid Khalifa');
+  assert.equal(customUser.emirate, 'Abu Dhabi');
+});

@@ -431,6 +431,31 @@ export function canAccessAdminDashboard(
   return Boolean(isAdminAuthenticated && user && user.role === 'admin');
 }
 
+export function buildCustomerDemoUser(input?: {
+  email?: string;
+  name?: string;
+  phone?: string;
+  emirate?: string;
+}): AuthenticatedUser {
+  const normalizedEmail = (input?.email || 'tariq.almaktoum@dubai.ae').trim().toLowerCase();
+  const resolvedName =
+    (input?.name || '').trim() ||
+    (normalizedEmail === 'tariq.almaktoum@dubai.ae'
+      ? 'Tariq Al Maktoum'
+      : normalizedEmail
+          .split('@')[0]
+          .replace(/[._-]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase()) || 'UAE Customer');
+  return {
+    uid: `uae-cust-${normalizedEmail.replace(/[^a-z0-9]/g, '').slice(0, 12) || 'demo'}`,
+    email: normalizedEmail,
+    displayName: resolvedName,
+    phone: (input?.phone || '+971 50 842 9910').trim(),
+    emirate: (input?.emirate || 'Dubai').trim(),
+    role: 'customer',
+  };
+}
+
 export interface StructuredDataInput {
   currentView: 'home' | 'category' | 'product' | 'admin';
   activeCategory: 'All' | ProductCategory;

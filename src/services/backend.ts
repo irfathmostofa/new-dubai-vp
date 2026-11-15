@@ -116,13 +116,20 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlacedOrderRes
 }
 
 /** Orders belonging to the signed-in customer (Row Level Security limits the rows). */
-export async function fetchMyOrders(catalog: Product[], userId: string): Promise<CustomerOrder[]> {
+export async function fetchMyOrders(
+  catalog: Product[],
+  userId: string,
+  userEmail?: string
+): Promise<CustomerOrder[]> {
   assertConfigured();
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+  const cleanEmail = (userEmail || '').trim().toLowerCase();
+  let query = supabase.from('orders').select('*');
+  if (cleanEmail) {
+    query = query.or(`user_id.eq.${userId},customer_email.ilike.${cleanEmail}`);
+  } else {
+    query = query.eq('user_id', userId);
+  }
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return (data as OrderRow[]).map((row) => mapOrderRow(row, catalog));
 }

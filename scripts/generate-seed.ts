@@ -62,6 +62,144 @@ for (const p of MOCK_PRODUCTS) {
   );
 }
 
+const DEMO_SEED_ORDERS = [
+  {
+    orderNumber: 'VDK-892410',
+    customerName: 'Tariq Al Maktoum',
+    customerEmail: 'tariq.almaktoum@dubai.ae',
+    customerPhone: '+971 50 842 9910',
+    emirate: 'Dubai',
+    deliveryAddress: 'Boulevard Point Tower, Apt 3402, Downtown Dubai',
+    paymentMethod: 'Cash on Delivery',
+    status: 'packed_al_quoz',
+    courierName: 'Rashid Al-Mansoor · Dubai Express Bike #14',
+    estimatedArrival: '35 mins (Sheikh Zayed Rd Route)',
+    subtotalAed: 145.0,
+    shippingFeeAed: 25.0,
+    totalAed: 170.0,
+    items: [
+      {
+        productId: 'elf-bar-10000-puffs',
+        title: 'Elf Bar 10000 Puffs Digital Display — Blue Razz Ice',
+        flavor: 'Chilled Blue Raspberry',
+        nicotine: '50mg (5%)',
+        packId: 'single',
+        packLabel: 'Single Unit (1x)',
+        quantity: 2,
+        unitPrice: 40.0,
+      },
+      {
+        productId: 'pod-salt-35k-puffs',
+        title: 'Pod Salt 35K Puffs Smart Screen — Double Apple Shisha',
+        flavor: 'Authentic Two Apple Molasses',
+        nicotine: '20mg (2%)',
+        packId: 'single',
+        packLabel: 'Single Unit (1x)',
+        quantity: 1,
+        unitPrice: 65.0,
+      },
+    ],
+  },
+  {
+    orderNumber: 'VDK-891855',
+    customerName: 'Tariq Al Maktoum',
+    customerEmail: 'tariq.almaktoum@dubai.ae',
+    customerPhone: '+971 50 842 9910',
+    emirate: 'Dubai',
+    deliveryAddress: 'Marina Gate Tower 1, Apt 1904, Dubai Marina',
+    paymentMethod: 'Card Link on Delivery',
+    status: 'out_for_delivery',
+    courierName: 'Zayed Al-Nuaimi · Marina Dispatch Van #07',
+    estimatedArrival: '15 mins (Jumeirah Beach Rd)',
+    subtotalAed: 280.0,
+    shippingFeeAed: 25.0,
+    totalAed: 305.0,
+    items: [
+      {
+        productId: 'juul-2-starter-kit',
+        title: 'Juul 2 Starter Kit — Slate Grey Device + 2 Virginia & Menthol Pods',
+        flavor: 'Virginia Tobacco & Crisp Menthol',
+        nicotine: '18mg/ml Official UAE Spec',
+        packId: 'single',
+        packLabel: 'Single Unit (1x)',
+        quantity: 1,
+        unitPrice: 135.0,
+      },
+      {
+        productId: 'vaporesso-xros-4-pro-kit',
+        title: 'Vaporesso XROS 4 Pro Vape Kit — Brushed Titanium Alloy',
+        flavor: 'Brushed Titanium Alloy',
+        nicotine: '0.4Ω + 0.8Ω COREX 2.0 Mesh',
+        packId: 'single',
+        packLabel: 'Single Unit (1x)',
+        quantity: 1,
+        unitPrice: 145.0,
+      },
+    ],
+  },
+  {
+    orderNumber: 'VDK-889302',
+    customerName: 'Tariq Al Maktoum',
+    customerEmail: 'tariq.almaktoum@dubai.ae',
+    customerPhone: '+971 50 842 9910',
+    emirate: 'Dubai',
+    deliveryAddress: 'Executive Towers East, Business Bay, Dubai',
+    paymentMethod: 'Cash on Delivery',
+    status: 'delivered',
+    courierName: 'Hamdan Courier · Business Bay Bike #03',
+    estimatedArrival: 'Delivered & COD Verified',
+    subtotalAed: 102.6,
+    shippingFeeAed: 25.0,
+    totalAed: 127.6,
+    items: [
+      {
+        productId: 'tugboat-super-12000-puffs',
+        title: 'Tugboat Super 12000 Puffs Digital — Mango Passionfruit Freeze',
+        flavor: 'Alphonso Mango & Passionfruit Ice',
+        nicotine: '50mg (5%)',
+        packId: 'pack3',
+        packLabel: '3-Pack Bundle (Save 10%)',
+        quantity: 1,
+        unitPrice: 102.6,
+      },
+    ],
+  },
+];
+
+lines.push('');
+lines.push('-- Demo UAE Customer Orders & Dispatch Telemetry');
+for (const o of DEMO_SEED_ORDERS) {
+  lines.push(
+    `insert into public.orders (order_number, customer_name, customer_email, customer_phone, emirate, delivery_address, payment_method, status, courier_name, estimated_arrival, subtotal_aed, shipping_fee_aed, total_aed, items) values (` +
+      [
+        q(o.orderNumber),
+        q(o.customerName),
+        q(o.customerEmail),
+        q(o.customerPhone),
+        q(o.emirate),
+        q(o.deliveryAddress),
+        q(o.paymentMethod),
+        q(o.status),
+        q(o.courierName),
+        q(o.estimatedArrival),
+        num(o.subtotalAed),
+        num(o.shippingFeeAed),
+        num(o.totalAed),
+        json(o.items),
+      ].join(', ') +
+      `) on conflict (order_number) do nothing;`
+  );
+}
+
+lines.push('');
+lines.push('-- Demo VIP Newsletter Leads');
+lines.push(
+  `insert into public.newsletter_leads (email, name, discount_code) values ('tariq.almaktoum@dubai.ae', 'Tariq Al Maktoum', 'DUBAIKING15') on conflict (email) do nothing;`
+);
+
 const out = path.resolve(import.meta.dirname, '../supabase/seed.sql');
 fs.writeFileSync(out, lines.join('\n') + '\n');
-console.log(`Wrote ${out} (${POPULAR_CATEGORY_CARDS.length} categories, ${MOCK_PRODUCTS.length} products)`);
+console.log(
+  `Wrote ${out} (${POPULAR_CATEGORY_CARDS.length} categories, ${MOCK_PRODUCTS.length} products, ${DEMO_SEED_ORDERS.length} demo orders)`
+);
+

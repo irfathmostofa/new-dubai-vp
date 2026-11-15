@@ -18,6 +18,12 @@ import {
   SkipForward,
   Radio,
   MapPin,
+  Receipt,
+  CreditCard,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  User,
 } from 'lucide-react';
 import { useCartStore } from '../store/useCartStore';
 import {
@@ -25,6 +31,7 @@ import {
   formatAED,
   getOrderProgressPercent,
   getOrderStatusLabel,
+  getCartItemUnitPrice,
 } from '../utils/storeLogic';
 import { OrderTrackingTimeline } from './OrderTrackingTimeline';
 
@@ -44,6 +51,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
   const signInWithGoogle = useCartStore((state) => state.signInWithGoogle);
   const signInWithEmail = useCartStore((state) => state.signInWithEmail);
   const signUpWithEmail = useCartStore((state) => state.signUpWithEmail);
+  const signInDemoCustomer = useCartStore((state) => state.signInDemoCustomer);
   const signOutUser = useCartStore((state) => state.signOutUser);
   const navigateToAdmin = useCartStore((state) => state.navigateToAdmin);
   const fetchSessionOrderHistory = useCartStore((state) => state.fetchSessionOrderHistory);
@@ -56,6 +64,9 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
   const [selectedHistoryOrderId, setSelectedHistoryOrderId] = useState<string>(
     recentOrders[0]?.orderId || 'VDK-892410'
   );
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({
+    'VDK-892410': true,
+  });
   const [isLiveStreamActive, setIsLiveStreamActive] = useState<boolean>(false);
 
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -98,16 +109,43 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
     return () => clearInterval(timer);
   }, [open, isLiveStreamActive, selectedHistoryOrderId, tickSessionOrderHistoryStatus]);
 
+  const toggleOrderDetailsExpanded = (orderId: string) => {
+    setExpandedOrderIds((prev) => ({
+      ...prev,
+      [orderId]: !prev[orderId],
+    }));
+  };
+
+  const handleInspectOrderTracking = (orderId: string) => {
+    setSelectedHistoryOrderId(orderId);
+    setExpandedOrderIds((prev) => ({ ...prev, [orderId]: true }));
+  };
+
   const handleGoogleSignIn = async () => {
     setAuthError(null);
     setAuthNotice(null);
     setIsSigningIn(true);
-    // Redirects to Google and back; the auth listener picks up the session.
     const result = await signInWithGoogle();
+    setIsSigningIn(false);
     if (!result.success) {
       setAuthError(result.error || 'Google sign-in failed. Please try again.');
-      setIsSigningIn(false);
+    } else {
+      setActiveTab('orders');
     }
+  };
+
+  const handleQuickDemoCustomerLogin = () => {
+    setAuthError(null);
+    setAuthNotice(null);
+    signInDemoCustomer({
+      email: 'tariq.almaktoum@dubai.ae',
+      name: 'Tariq Al Maktoum',
+      phone: '+971 50 842 9910',
+      emirate: 'Dubai',
+    });
+    setSelectedHistoryOrderId('VDK-892410');
+    setExpandedOrderIds((prev) => ({ ...prev, 'VDK-892410': true }));
+    setActiveTab('orders');
   };
 
   const handleEmailAuthSubmit = async (e: React.FormEvent) => {
@@ -129,6 +167,9 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
           setAuthNotice('Account created. Check your inbox and confirm your email, then sign in.');
           setAuthMode('signin');
           setPasswordInput('');
+        } else {
+          setPasswordInput('');
+          setActiveTab('orders');
         }
       } else {
         const result = await signInWithEmail(emailInput, passwordInput);
@@ -136,6 +177,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
           setAuthError(result.error || 'Sign-in failed.');
         } else {
           setPasswordInput('');
+          setActiveTab('orders');
         }
       }
     } finally {
@@ -146,6 +188,16 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
   const handleSignOut = () => {
     signOutUser();
   };
+
+  const totalAccountSpend = useMemo(
+    () => sessionOrders.reduce((acc, ord) => acc + ord.total, 0),
+    [sessionOrders]
+  );
+
+  const activeInTransitCount = useMemo(
+    () => sessionOrders.filter((ord) => ord.status !== 'delivered').length,
+    [sessionOrders]
+  );
 
   return (
     <AnimatePresence>
@@ -170,19 +222,25 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.18 }}
-            className="relative z-10 max-h-[90vh] w-full max-w-4xl overflow-y-auto border border-zinc-200 bg-white shadow-2xl"
+            className="relative z-10 max-h-[92vh] w-full max-w-5xl overflow-y-auto border border-zinc-200 bg-white shadow-2xl"
           >
             {/* Modal Top Header */}
             <div className="sticky top-0 z-20 flex items-start sm:items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3.5 sm:px-6 sm:py-4">
               <div className="min-w-0 flex-1">
-                <span className="block text-[10px] sm:text-[11px] font-bold tracking-widest text-zinc-500 uppercase truncate">
-                  UAE Customer Account & Session Telemetry
-                </span>
+                <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] font-bold tracking-widest text-zinc-500 uppercase">
+                  <span>UAE Customer Account</span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {currentUser
+                      ? `Verified Member (${currentUser.email})`
+                      : 'Guest Session Active'}
+                  </span>
+                </div>
                 <h2
                   id="account-modal-title"
                   className="font-display text-base sm:text-xl font-bold text-zinc-950 leading-snug"
                 >
-                  Account, Order History & Real-Time Dispatch Tracking
+                  Account, Order Details & Real-Time Dispatch Tracking
                 </h2>
               </div>
 
@@ -231,7 +289,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                 }`}
               >
                 <Package className="h-3.5 w-3.5 shrink-0" />
-                <span>Order History</span>
+                <span>Order History & Details</span>
                 <span
                   data-testid="order-history-count-badge"
                   className="font-mono-num bg-zinc-950 px-1.5 py-0.5 text-[10px] font-bold text-white"
@@ -270,22 +328,22 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
               >
                 <UserCheck className="h-3.5 w-3.5 shrink-0" />
                 <span>
-                  {currentUser ? `Signed In (${currentUser.displayName})` : 'Sign In / Auth'}
+                  {currentUser ? `Account (${currentUser.displayName})` : 'Customer Sign In'}
                 </span>
               </button>
             </div>
 
             <div className="p-4 sm:p-6 space-y-6">
-              {/* TAB 1: Order History Linked to User Session + Real-Time Mock Timeline */}
+              {/* TAB 1: Order History + Full Order Details Breakdown + Real-Time Tracking */}
               {activeTab === 'orders' && (
                 <div data-testid="order-history-panel" className="space-y-5">
-                  {/* Session Link & Real-Time Status Fetch Controls */}
+                  {/* Customer Account Status & Quick Demo Login Banner */}
                   <div className="flex flex-col gap-3 border border-zinc-200 bg-zinc-950 p-4 text-white sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 bg-emerald-500/20 px-2 py-0.5 font-mono-num text-[10px] font-bold text-emerald-300 uppercase">
                           <Radio className="h-2.5 w-2.5" />
-                          <span>Session Linked</span>
+                          <span>{currentUser ? 'Customer Authenticated' : 'Session Linked'}</span>
                         </span>
                         <span
                           data-testid="order-history-session-id"
@@ -297,17 +355,31 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] text-zinc-400">
-                        Real-time order history synced with session storage & Dubai dispatch telemetry
-                        {lastOrderHistorySyncAt ? ` · Last synced ${lastOrderHistorySyncAt}` : ''}
+                        {currentUser
+                          ? `${sessionOrders.length} UAE orders linked (${activeInTransitCount} active in-transit · Total ${formatAED(totalAccountSpend)})`
+                          : 'Sign in to sync your UAE Cash on Delivery orders, itemized invoices, and live courier telemetry'}
+                        {lastOrderHistorySyncAt ? ` · Synced ${lastOrderHistorySyncAt}` : ''}
                       </p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {!currentUser && (
+                        <button
+                          type="button"
+                          data-testid="orders-tab-demo-login-btn"
+                          onClick={handleQuickDemoCustomerLogin}
+                          className="inline-flex items-center gap-1.5 border border-emerald-400 bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-zinc-950 transition-colors hover:bg-emerald-400 whitespace-nowrap"
+                        >
+                          <User className="h-3 w-3" />
+                          <span>Demo Customer Sign In</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         data-testid="order-history-live-stream-btn"
                         onClick={() => setIsLiveStreamActive((prev) => !prev)}
-                        className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                        className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-[11px] font-bold transition-colors whitespace-nowrap ${
                           isLiveStreamActive
                             ? 'border-emerald-400 bg-emerald-500 text-zinc-950'
                             : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-400'
@@ -324,7 +396,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                         data-testid="refresh-order-history-btn"
                         disabled={isFetchingOrderHistory}
                         onClick={() => fetchSessionOrderHistory()}
-                        className="inline-flex items-center gap-1.5 border border-white bg-white px-3 py-1.5 text-[11px] font-bold text-zinc-950 transition-colors hover:bg-zinc-200 disabled:opacity-60"
+                        className="inline-flex items-center gap-1.5 border border-white bg-white px-3 py-1.5 text-[11px] font-bold text-zinc-950 transition-colors hover:bg-zinc-200 disabled:opacity-60 whitespace-nowrap"
                       >
                         <RefreshCw
                           className={`h-3 w-3 ${isFetchingOrderHistory ? 'animate-spin' : ''}`}
@@ -336,16 +408,17 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                     </div>
                   </div>
 
-                  {/* Session Order History Cards List */}
-                  <div
-                    data-testid="order-history-list"
-                    className="space-y-3"
-                  >
+                  {/* Session Order History Cards List with Expandable Order Details */}
+                  <div data-testid="order-history-list" className="space-y-4">
                     {sessionOrders.map((order) => {
                       const isSelected = order.orderId === selectedHistoryOrderId;
+                      const isExpanded = Boolean(expandedOrderIds[order.orderId] || isSelected);
                       const progress = getOrderProgressPercent(order.status);
                       const statusLabel = getOrderStatusLabel(order.status);
                       const isDelivered = order.status === 'delivered';
+                      const activeMilestone =
+                        order.timeline?.find((t) => t.current) ||
+                        order.timeline?.[order.timeline.length - 1];
 
                       return (
                         <div
@@ -362,7 +435,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-mono-num text-sm font-bold text-zinc-950">
-                                  #{order.orderId}
+                                  Order #{order.orderId}
                                 </span>
                                 <span
                                   data-testid={`order-history-status-${order.orderId}`}
@@ -380,16 +453,16 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                                   <span>{statusLabel}</span>
                                 </span>
                                 <span className="font-mono-num text-[11px] font-semibold text-zinc-500">
-                                  ({progress}%)
+                                  ({progress}% Complete)
                                 </span>
                               </div>
 
-                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600">
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600">
                                 <span className="inline-flex items-center gap-1">
                                   <Clock className="h-3 w-3 text-zinc-400" />
                                   <span>{order.createdAt}</span>
                                 </span>
-                                <span className="text-zinc-300">·</span>
+                                <span className="text-zinc-300" aria-hidden="true">·</span>
                                 <span className="inline-flex items-center gap-1">
                                   <MapPin className="h-3 w-3 text-zinc-400" />
                                   <span className="truncate max-w-xs">
@@ -409,18 +482,33 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                                 </p>
                               </div>
 
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  data-testid={`history-toggle-details-${order.orderId}`}
+                                  onClick={() => toggleOrderDetailsExpanded(order.orderId)}
+                                  className="inline-flex items-center gap-1 border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-900 transition-colors hover:border-zinc-950 whitespace-nowrap"
+                                >
+                                  <Receipt className="h-3 w-3" />
+                                  <span>{isExpanded ? 'Hide Details' : 'Order Details'}</span>
+                                  {isExpanded ? (
+                                    <ChevronUp className="h-3 w-3" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3" />
+                                  )}
+                                </button>
+
                                 <button
                                   type="button"
                                   data-testid={`history-select-order-${order.orderId}`}
-                                  onClick={() => setSelectedHistoryOrderId(order.orderId)}
-                                  className={`px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
+                                  onClick={() => handleInspectOrderTracking(order.orderId)}
+                                  className={`px-2.5 py-1.5 text-[11px] font-bold transition-colors whitespace-nowrap ${
                                     isSelected
                                       ? 'bg-zinc-950 text-white'
                                       : 'border border-zinc-300 bg-white text-zinc-900 hover:border-zinc-950'
                                   }`}
                                 >
-                                  {isSelected ? 'Viewing Timeline' : 'Inspect Timeline'}
+                                  {isSelected ? 'Tracking Active' : 'Track Live'}
                                 </button>
 
                                 <button
@@ -431,7 +519,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                                     tickSessionOrderHistoryStatus(order.orderId);
                                   }}
                                   title="Advance mock real-time status step"
-                                  className="inline-flex items-center gap-1 border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-900 transition-colors hover:border-zinc-950"
+                                  className="inline-flex items-center gap-1 border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-900 transition-colors hover:border-zinc-950 whitespace-nowrap"
                                 >
                                   <SkipForward className="h-3 w-3" />
                                   <span>Next Step</span>
@@ -445,7 +533,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                                     onClose();
                                   }}
                                   title="Add items from this order to cart"
-                                  className="inline-flex items-center gap-1 border border-zinc-200 bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-950 hover:text-white"
+                                  className="inline-flex items-center gap-1 border border-zinc-200 bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-950 hover:text-white whitespace-nowrap"
                                 >
                                   <RotateCcw className="h-3 w-3" />
                                   <span className="hidden sm:inline">Reorder</span>
@@ -455,31 +543,175 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                           </div>
 
                           {/* Ordered Line Items Strip */}
-                          <div className="px-4 py-3">
+                          <div className="px-4 py-3 bg-white">
                             <div className="flex flex-wrap items-center gap-2.5">
-                              {order.items.map((item, idx) => (
-                                <div
-                                  key={`${order.orderId}-item-${idx}`}
-                                  className="flex items-center gap-2.5 border border-zinc-200 bg-white px-2.5 py-1.5 text-xs"
-                                >
-                                  <img
-                                    src={item.product.image}
-                                    alt={item.product.title}
-                                    className="h-8 w-8 shrink-0 border border-zinc-100 object-cover"
-                                  />
-                                  <div className="min-w-0">
-                                    <p className="font-semibold text-zinc-900 truncate max-w-[200px]">
-                                      {item.quantity}× {item.product.title}
-                                    </p>
-                                    <p className="text-[10px] text-zinc-500">
-                                      {item.selectedVariant?.flavor || item.product.flavorProfile} ·{' '}
-                                      {item.selectedVariant?.nicotine || item.product.nicotineStrength}
-                                    </p>
+                              {order.items.map((item, idx) => {
+                                const unitPrice = getCartItemUnitPrice(item);
+                                return (
+                                  <div
+                                    key={`${order.orderId}-item-${idx}`}
+                                    className="flex items-center gap-2.5 border border-zinc-200 bg-zinc-50/60 px-2.5 py-1.5 text-xs"
+                                  >
+                                    <img
+                                      src={item.product.image}
+                                      alt={item.product.title}
+                                      referrerPolicy="no-referrer"
+                                      className="h-9 w-9 shrink-0 border border-zinc-200 bg-white object-cover"
+                                    />
+                                    <div className="min-w-0">
+                                      <p className="font-semibold text-zinc-900 truncate max-w-[210px]">
+                                        {item.quantity}× {item.product.title}
+                                      </p>
+                                      <p className="text-[10px] text-zinc-500">
+                                        {item.selectedVariant?.flavor || item.product.flavorProfile}{' '}
+                                        ·{' '}
+                                        {item.selectedVariant?.nicotine ||
+                                          item.product.nicotineStrength}{' '}
+                                        ·{' '}
+                                        <span className="font-mono-num font-semibold text-zinc-800">
+                                          {formatAED(unitPrice * item.quantity)}
+                                        </span>
+                                      </p>
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
+
+                          {/* Expandable Comprehensive Order Details & Courier Dispatch Breakdown */}
+                          {isExpanded && (
+                            <div
+                              data-testid={`order-details-expanded-${order.orderId}`}
+                              className="border-t border-zinc-200 bg-zinc-50 p-4 space-y-4 text-xs"
+                            >
+                              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                {/* 1. Recipient & Delivery Destination */}
+                                <div className="border border-zinc-200 bg-white p-3.5 space-y-1.5">
+                                  <p className="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                                    Recipient & Delivery Address
+                                  </p>
+                                  <p className="font-bold text-zinc-950">{order.fullName}</p>
+                                  <p className="text-zinc-600">{order.address}</p>
+                                  <p className="text-zinc-600">
+                                    {order.emirate}, United Arab Emirates
+                                  </p>
+                                  <p className="font-mono-num text-[11px] text-zinc-500 pt-1">
+                                    {order.phone} {order.email ? `· ${order.email}` : ''}
+                                  </p>
+                                </div>
+
+                                {/* 2. Assigned Courier & Live Dispatch Telemetry */}
+                                <div className="border border-zinc-200 bg-white p-3.5 space-y-1.5">
+                                  <p className="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                                    Assigned UAE Express Courier
+                                  </p>
+                                  <p className="font-bold text-zinc-950">{order.courierName}</p>
+                                  <p className="text-zinc-600">
+                                    ETA:{' '}
+                                    <span className="font-semibold text-zinc-900">
+                                      {order.estimatedArrival}
+                                    </span>
+                                  </p>
+                                  {activeMilestone && (
+                                    <p className="text-[11px] text-zinc-500 pt-1">
+                                      Current Hub: {activeMilestone.location} (
+                                      {activeMilestone.timestamp})
+                                    </p>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedHistoryOrderId(order.orderId);
+                                      setActiveTab('tracking');
+                                    }}
+                                    className="inline-flex items-center gap-1 pt-1 text-[11px] font-bold text-zinc-950 underline underline-offset-4 hover:text-zinc-700"
+                                  >
+                                    <span>Open Full Live GPS Tracker</span>
+                                    <ArrowRight className="h-3 w-3" />
+                                  </button>
+                                </div>
+
+                                {/* 3. Financial Summary & COD Invoice Breakdown */}
+                                <div className="border border-zinc-200 bg-white p-3.5 space-y-1.5">
+                                  <p className="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                                    Payment & Invoice Breakdown
+                                  </p>
+                                  <div className="flex items-center justify-between text-zinc-600">
+                                    <span>Items Subtotal ({order.items.length} lines)</span>
+                                    <span className="font-mono-num font-semibold text-zinc-900">
+                                      {formatAED(order.subtotal)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-zinc-600">
+                                    <span>UAE Same-Day Courier</span>
+                                    <span className="font-mono-num font-semibold text-zinc-900">
+                                      {order.shippingFee === 0
+                                        ? 'FREE'
+                                        : formatAED(order.shippingFee)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between border-t border-zinc-200 pt-1.5 font-bold text-zinc-950">
+                                    <span>Total ({order.paymentMethod})</span>
+                                    <span className="font-mono-num text-sm">
+                                      {formatAED(order.total)}
+                                    </span>
+                                  </div>
+                                  <p className="flex items-center gap-1 text-[10px] text-zinc-500 pt-0.5">
+                                    <CreditCard className="h-3 w-3 shrink-0" />
+                                    <span>ESMA 100% Excise Tax Included</span>
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Itemized Line-Item Table */}
+                              <div className="border border-zinc-200 bg-white overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-zinc-200 bg-zinc-50 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
+                                      <th className="py-2 px-3">Hardware / E-Liquid SKU</th>
+                                      <th className="py-2 px-3">Selected Flavour & Nicotine</th>
+                                      <th className="py-2 px-3">Pack Tier</th>
+                                      <th className="py-2 px-3 text-right">Qty</th>
+                                      <th className="py-2 px-3 text-right">Unit Price</th>
+                                      <th className="py-2 px-3 text-right">Line Total</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-zinc-200 text-xs">
+                                    {order.items.map((line, lineIdx) => {
+                                      const unitPrice = getCartItemUnitPrice(line);
+                                      return (
+                                        <tr key={`${order.orderId}-row-${lineIdx}`}>
+                                          <td className="py-2.5 px-3 font-semibold text-zinc-950">
+                                            {line.product.title}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-zinc-600">
+                                            {line.selectedVariant?.flavor ||
+                                              line.product.flavorProfile}{' '}
+                                            ·{' '}
+                                            {line.selectedVariant?.nicotine ||
+                                              line.product.nicotineStrength}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-zinc-600">
+                                            {line.selectedVariant?.packLabel || 'Single Unit (1x)'}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right font-mono-num font-semibold text-zinc-900">
+                                            {line.quantity}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right font-mono-num text-zinc-600">
+                                            {formatAED(unitPrice)}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right font-mono-num font-bold text-zinc-950">
+                                            {formatAED(unitPrice * line.quantity)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -493,10 +725,10 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h3 className="font-display text-sm font-bold text-zinc-950">
-                          Real-Time Mock Status Timeline — Order #{selectedHistoryOrderId}
+                          Real-Time Dispatch Status Timeline — Order #{selectedHistoryOrderId}
                         </h3>
                         <p className="text-xs text-zinc-500">
-                          Interactive 5-stage courier timeline linked to your active session order history.
+                          Interactive 5-stage courier timeline linked to your active customer order history.
                         </p>
                       </div>
                       <button
@@ -540,70 +772,228 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                 </div>
               )}
 
-              {/* TAB 3: Authentication & Profile (Supabase Auth: Google OAuth + email/password) */}
+              {/* TAB 3: Authentication & Profile (Customer Login + Instant Demo Customer Access) */}
               {activeTab === 'profile' && (
                 <div className="space-y-5">
                   {currentUser ? (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-4 border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center bg-zinc-950 text-white font-display font-bold text-sm">
+                    <div
+                      data-testid="authenticated-customer-dashboard"
+                      className="space-y-5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-4 border border-zinc-200 bg-zinc-950 p-5 text-white">
+                        <div className="flex items-center gap-3.5">
+                          <div className="flex h-12 w-12 items-center justify-center border border-zinc-700 bg-zinc-900 text-white font-display font-bold text-base">
                             {currentUser.displayName.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-display text-sm font-bold text-zinc-950">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-display text-base font-bold text-white">
                                 {currentUser.displayName}
                               </p>
-                              <span className="bg-zinc-950 px-2 py-0.5 text-[10px] font-bold text-white uppercase">
-                                {currentUser.role}
+                              <span className="bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 uppercase">
+                                Verified {currentUser.role}
                               </span>
                             </div>
-                            <p className="text-xs text-zinc-600">
-                              {currentUser.email}{currentUser.phone ? ` · ${currentUser.phone}` : ''}
+                            <p className="mt-0.5 text-xs text-zinc-300">
+                              {currentUser.email}
+                              {currentUser.phone ? ` · ${currentUser.phone}` : ''}
+                              {currentUser.emirate ? ` · ${currentUser.emirate}, UAE` : ''}
                             </p>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={handleSignOut}
-                          className="inline-flex items-center gap-1.5 border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"
-                        >
-                          <LogOut className="h-3.5 w-3.5" />
-                          <span>Sign Out</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            data-testid="profile-view-orders-btn"
+                            onClick={() => setActiveTab('orders')}
+                            className="inline-flex items-center gap-1.5 bg-white px-3.5 py-2 text-xs font-bold text-zinc-950 transition-colors hover:bg-zinc-200"
+                          >
+                            <Package className="h-3.5 w-3.5" />
+                            <span>View Orders ({sessionOrders.length})</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            data-testid="signout-user-btn"
+                            onClick={handleSignOut}
+                            className="inline-flex items-center gap-1.5 border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-semibold text-zinc-200 hover:border-white hover:text-white"
+                          >
+                            <LogOut className="h-3.5 w-3.5" />
+                            <span>Sign Out</span>
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="border border-zinc-200 p-4 text-xs text-zinc-600 space-y-2">
-                        <p className="font-bold text-zinc-950">
-                          Signed In
-                        </p>
-                        <p>
-                          Your account is linked to your order history and order status email notifications.
-                        </p>
+                      {/* Customer Account KPI Summary Cards */}
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div className="border border-zinc-200 bg-zinc-50 p-4">
+                          <p className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                            Total UAE Orders
+                          </p>
+                          <p className="mt-1 font-mono-num text-xl font-bold text-zinc-950">
+                            {sessionOrders.length} Orders
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            Synced with {currentUser.email}
+                          </p>
+                        </div>
+
+                        <div className="border border-zinc-200 bg-zinc-50 p-4">
+                          <p className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                            Active Dispatch
+                          </p>
+                          <p className="mt-1 font-mono-num text-xl font-bold text-zinc-950">
+                            {activeInTransitCount} In Transit
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            Live Al Quoz hub & bike telemetry
+                          </p>
+                        </div>
+
+                        <div className="border border-zinc-200 bg-zinc-50 p-4">
+                          <p className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                            Lifetime Spend
+                          </p>
+                          <p className="mt-1 font-mono-num text-xl font-bold text-zinc-950">
+                            {formatAED(totalAccountSpend)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            Cash & Card Link on Delivery
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Signed-In Customer Direct Order & Tracking Preview */}
+                      <div className="border border-zinc-200 bg-white p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 pb-3">
+                          <div>
+                            <h3 className="font-display text-sm font-bold text-zinc-950">
+                              Your Linked Orders & Live Tracking
+                            </h3>
+                            <p className="text-xs text-zinc-500">
+                              Select any order below to inspect full line-item invoices or live courier GPS stages.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('tracking')}
+                            className="text-xs font-bold text-zinc-950 underline underline-offset-4 hover:text-zinc-700"
+                          >
+                            Open Live Courier Tracker
+                          </button>
+                        </div>
+
+                        <div className="divide-y divide-zinc-200">
+                          {sessionOrders.map((ord) => (
+                            <div
+                              key={`profile-ord-${ord.orderId}`}
+                              className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono-num text-xs font-bold text-zinc-950">
+                                    #{ord.orderId}
+                                  </span>
+                                  <span className="bg-zinc-950 px-2 py-0.5 text-[10px] font-bold text-white uppercase">
+                                    {getOrderStatusLabel(ord.status)}
+                                  </span>
+                                  <span className="font-mono-num text-xs font-bold text-zinc-900">
+                                    {formatAED(ord.total)}
+                                  </span>
+                                </div>
+                                <p className="mt-0.5 text-xs text-zinc-500">
+                                  {ord.createdAt} · {ord.address}, {ord.emirate} ·{' '}
+                                  {ord.items.map((i) => `${i.quantity}× ${i.product.title}`).join(', ')}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  data-testid={`profile-order-details-btn-${ord.orderId}`}
+                                  onClick={() => {
+                                    setSelectedHistoryOrderId(ord.orderId);
+                                    setExpandedOrderIds((prev) => ({
+                                      ...prev,
+                                      [ord.orderId]: true,
+                                    }));
+                                    setActiveTab('orders');
+                                  }}
+                                  className="border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-900 hover:border-zinc-950 whitespace-nowrap"
+                                >
+                                  Order Details
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid={`profile-track-order-btn-${ord.orderId}`}
+                                  onClick={() => {
+                                    setSelectedHistoryOrderId(ord.orderId);
+                                    setActiveTab('tracking');
+                                  }}
+                                  className="bg-zinc-950 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-zinc-800 whitespace-nowrap"
+                                >
+                                  Track Order
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      {/* Left: Google OAuth via Supabase Auth */}
-                      <div className="flex flex-col justify-between border border-zinc-200 bg-zinc-50 p-5">
-                        <div>
-                          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
-                            <Shield className="h-3.5 w-3.5 text-zinc-950" />
-                            <span>Verified OAuth Identity</span>
-                          </div>
-                          <h3 className="mt-1.5 font-display text-base font-bold text-zinc-950">
-                            Continue with Google
-                          </h3>
-                          <p className="mt-1.5 text-xs leading-relaxed text-zinc-600">
-                            Sign in with Google to see your order history across devices.
-                          </p>
-                          {authError && (
-                            <p className="mt-3 border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900">
-                              {authError}
+                      {/* Left: Instant Demo Customer Access + Google OAuth */}
+                      <div className="flex flex-col justify-between border border-zinc-200 bg-zinc-50 p-5 space-y-5">
+                        <div className="space-y-4">
+                          <div>
+                            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                              <Shield className="h-3.5 w-3.5 text-zinc-950" />
+                              <span>Instant UAE Customer Access</span>
+                            </div>
+                            <h3 className="mt-1.5 font-display text-base font-bold text-zinc-950">
+                              Demo Customer Account (Tariq Al Maktoum)
+                            </h3>
+                            <p className="mt-1 text-xs leading-relaxed text-zinc-600">
+                              Sign in with one click to inspect seeded UAE Cash on Delivery orders (
+                              <span className="font-mono-num font-semibold text-zinc-900">
+                                #VDK-892410
+                              </span>
+                              ,{' '}
+                              <span className="font-mono-num font-semibold text-zinc-900">
+                                #VDK-891855
+                              </span>
+                              ,{' '}
+                              <span className="font-mono-num font-semibold text-zinc-900">
+                                #VDK-889302
+                              </span>
+                              ), itemized tax invoices, and live Dubai courier tracking.
                             </p>
-                          )}
+                          </div>
+
+                          <button
+                            type="button"
+                            data-testid="demo-customer-login-btn"
+                            onClick={handleQuickDemoCustomerLogin}
+                            className="flex w-full items-center justify-center gap-2 bg-zinc-950 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-zinc-800"
+                          >
+                            <UserCheck className="h-4 w-4 text-emerald-400" />
+                            <span>Sign In as Demo Customer (Tariq Al Maktoum)</span>
+                          </button>
+
+                          <div className="border-t border-zinc-200 pt-4">
+                            <p className="text-xs font-bold text-zinc-900">
+                              Or Continue with Google OAuth
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-600">
+                              Sync your verified Google identity with Supabase Auth.
+                            </p>
+                            {authError && (
+                              <p className="mt-3 border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+                                {authError}
+                              </p>
+                            )}
+                          </div>
                         </div>
 
                         <button
@@ -611,15 +1001,15 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                           data-testid="google-signin-btn"
                           disabled={isSigningIn}
                           onClick={handleGoogleSignIn}
-                          className="mt-5 flex w-full items-center justify-center gap-2 bg-zinc-950 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                          className="flex w-full items-center justify-center gap-2 border border-zinc-950 bg-white px-4 py-2.5 text-xs font-bold text-zinc-950 transition-colors hover:bg-zinc-950 hover:text-white disabled:opacity-50"
                         >
                           <span>
-                            {isSigningIn ? 'Authenticating...' : 'Sign In with Google OAuth'}
+                            {isSigningIn ? 'Authenticating...' : 'Continue with Google OAuth'}
                           </span>
                         </button>
                       </div>
 
-                      {/* Right: Email + password (Supabase Auth) */}
+                      {/* Right: Email + password (Supabase Auth + Local Session Support) */}
                       <form
                         onSubmit={handleEmailAuthSubmit}
                         className="border border-zinc-200 bg-white p-5 space-y-3.5"
@@ -671,6 +1061,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                               autoComplete="name"
                               value={nameInput}
                               onChange={(e) => setNameInput(e.target.value)}
+                              placeholder="e.g. Tariq Al Maktoum"
                               className="mt-1 w-full border border-zinc-300 px-3 py-2 text-xs text-zinc-950 focus:border-zinc-950 focus:outline-none"
                             />
                           </div>
@@ -691,6 +1082,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                               autoComplete="email"
                               value={emailInput}
                               onChange={(e) => setEmailInput(e.target.value)}
+                              placeholder="tariq.almaktoum@dubai.ae"
                               className="w-full border border-zinc-300 py-2 pr-3 pl-8 text-xs text-zinc-950 focus:border-zinc-950 focus:outline-none"
                             />
                           </div>
@@ -712,7 +1104,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                                 autoComplete="tel"
                                 value={phoneInput}
                                 onChange={(e) => setPhoneInput(e.target.value)}
-                                placeholder="+971 50 000 0000"
+                                placeholder="+971 50 842 9910"
                                 className="w-full border border-zinc-300 py-2 pr-3 pl-8 text-xs text-zinc-950 focus:border-zinc-950 focus:outline-none"
                               />
                             </div>
@@ -729,10 +1121,11 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                             id="account-password"
                             type="password"
                             required
-                            minLength={8}
+                            minLength={6}
                             autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
                             value={passwordInput}
                             onChange={(e) => setPasswordInput(e.target.value)}
+                            placeholder="Minimum 6 characters"
                             className="mt-1 w-full border border-zinc-300 px-3 py-2 text-xs text-zinc-950 focus:border-zinc-950 focus:outline-none"
                           />
                         </div>
@@ -745,7 +1138,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
                           {isSigningIn
                             ? 'Please wait...'
                             : authMode === 'signin'
-                              ? 'Sign In'
+                              ? 'Sign In & View My Orders'
                               : 'Create Account'}
                         </button>
                       </form>

@@ -38,12 +38,43 @@ import {
   resolveInitialViewFromPathname,
   getPathnameForView,
   validateAdminLoginInput,
+  buildCustomerDemoUser,
   NEWSLETTER_DISCOUNT_CODE,
   USER_ORDER_SESSION_KEY,
   USER_SESSION_ID_KEY,
   mergeSessionOrdersWithFetched,
   simulateRealtimeOrderHistoryTick,
 } from '../utils/storeLogic';
+
+const DEMO_CUSTOMER_STORAGE_KEY = 'vdk-demo-customer-user-v1';
+
+function loadSavedDemoCustomer(): AuthenticatedUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(DEMO_CUSTOMER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.email === 'string') {
+      return parsed as AuthenticatedUser;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function saveDemoCustomer(user: AuthenticatedUser | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (user) {
+      window.sessionStorage.setItem(DEMO_CUSTOMER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      window.sessionStorage.removeItem(DEMO_CUSTOMER_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function syncBrowserUrlForView(view: 'home' | 'category' | 'product' | 'admin'): void {
   if (typeof window === 'undefined') return;
@@ -366,6 +397,12 @@ interface CartStoreState {
     phone: string;
   }) => Promise<AuthResult & { needsEmailConfirmation?: boolean }>;
   signInWithGoogle: () => Promise<AuthResult>;
+  signInDemoCustomer: (input?: {
+    email?: string;
+    name?: string;
+    phone?: string;
+    emirate?: string;
+  }) => AuthResult;
   signOutUser: () => void;
   loginAdmin: (email: string, password: string) => Promise<AuthResult>;
   loginAdminWithGoogle: () => Promise<AuthResult>;
@@ -461,7 +498,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   lastOrderHistorySyncAt: '14:35 GST',
   emailLogs: [],
   adminOrders: [],
-  currentUser: null,
+  currentUser: loadSavedDemoCustomer(),
   isAdminAuthenticated: false,
   isCheckingAdminSession: isSupabaseConfigured,
   recentlyAddedId: null,
@@ -642,14 +679,19 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
   initAuth: () => {
     if (!isSupabaseConfigured) {
-      set({ isCheckingAdminSession: false });
+      const savedCustomer = loadSavedDemoCustomer();
+      set({
+        currentUser: savedCustomer,
+        isCheckingAdminSession: false,
+      });
       return () => {};
     }
 
     const applySession = async (session: Session | null) => {
       if (!session?.user) {
+        const savedCustomer = loadSavedDemoCustomer();
         set({
-          currentUser: null,
+          currentUser: savedCustomer,
           isAdminAuthenticated: false,
           isCheckingAdminSession: false,
           adminOrders: [],
@@ -660,6 +702,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       const user = await fetchProfile(session.user);
       const isAdmin = user.role === 'admin';
       set({ currentUser: user, isAdminAuthenticated: isAdmin, isCheckingAdminSession: false });
+      void get().fetchSessionOrderHistory();
       if (isAdmin) void get().loadAdminData();
     };
 
@@ -673,22 +716,54 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   },
 
   signInWithEmail: async (email, password) => {
-    if (!isSupabaseConfigured) return { success: false, error: NOT_CONFIGURED_MESSAGE };
+    const trimmedEmail = (email || '').trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return { success: false, error: 'Please enter a valid email address.' };
+    }
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
+    if (!isSupabaseConfigured) {
+      return get().signInDemoCustomer({ email: trimmedEmail });
+    }
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: trimmedEmail,
       password,
     });
     if (error) return { success: false, error: friendlyAuthError(error.message) };
+    void get().fetchSessionOrderHistory();
     return { success: true };
   },
 
   signUpWithEmail: async ({ email, password, name, phone }) => {
-    if (!isSupabaseConfigured) return { success: false, error: NOT_CONFIGURED_MESSAGE };
+    const trimmedEmail = (email || '').trim().toLowerCase();
+    const trimmedName = (name || '').trim();
+    const trimmedPhone = (phone || '').trim();
+    if (!trimmedName) {
+      return { success: false, error: 'Please enter your full name.' };
+    }
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return { success: false, error: 'Please enter a valid email address.' };
+    }
+    if (!trimmedPhone) {
+      return { success: false, error: 'Please enter your UAE mobile number.' };
+    }
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
+    if (!isSupabaseConfigured) {
+      const res = get().signInDemoCustomer({
+        email: trimmedEmail,
+        name: trimmedName,
+        phone: trimmedPhone,
+      });
+      return { ...res, needsEmailConfirmation: false };
+    }
     const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: trimmedEmail,
       password,
       options: {
-        data: { display_name: name.trim(), phone: phone.trim() },
+        data: { display_name: trimmedName, phone: trimmedPhone },
         emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
       },
     });
@@ -701,7 +776,14 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   },
 
   signInWithGoogle: async () => {
-    if (!isSupabaseConfigured) return { success: false, error: NOT_CONFIGURED_MESSAGE };
+    if (!isSupabaseConfigured) {
+      return get().signInDemoCustomer({
+        email: 'tariq.almaktoum@dubai.ae',
+        name: 'Tariq Al Maktoum',
+        phone: '+971 50 842 9910',
+        emirate: 'Dubai',
+      });
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined },
@@ -709,7 +791,33 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
     return error ? { success: false, error: friendlyAuthError(error.message) } : { success: true };
   },
 
+  signInDemoCustomer: (input) => {
+    const demoUser = buildCustomerDemoUser(input);
+    saveDemoCustomer(demoUser);
+    set((state) => {
+      const mergedOrders = mergeSessionOrdersWithFetched(
+        state.recentOrders,
+        INITIAL_SAMPLE_ORDERS
+      );
+      saveSessionOrdersToStorage(mergedOrders);
+      return {
+        currentUser: demoUser,
+        recentOrders: mergedOrders,
+        sessionOrderIds: Array.from(
+          new Set([...state.sessionOrderIds, ...mergedOrders.map((o) => o.orderId)])
+        ),
+        lastOrderHistorySyncAt: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      };
+    });
+    return { success: true };
+  },
+
   signOutUser: () => {
+    saveDemoCustomer(null);
     set((state) => ({
       currentUser: null,
       isAdminAuthenticated: false,
@@ -718,7 +826,9 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       emailLogs: [],
       lastOrder: state.lastOrder,
     }));
-    void supabase.auth.signOut();
+    if (isSupabaseConfigured) {
+      void supabase.auth.signOut();
+    }
   },
 
   // Admin sign-in: a normal Supabase sign-in, then the profile must have role 'admin'.
@@ -780,6 +890,31 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
   placeOrder: async (orderData) => {
     const email = (orderData.email || get().currentUser?.email || '').trim();
+    if (!isSupabaseConfigured) {
+      const localOrderId = `VDK-${Math.floor(100000 + Math.random() * 900000)}`;
+      const newOrder: CustomerOrder = {
+        ...orderData,
+        email,
+        orderId: localOrderId,
+        createdAt: 'Just now · GST',
+        status: 'order_placed',
+        courierName: 'Rashid Al-Mansoor · Dubai Express Bike #14',
+        estimatedArrival: 'Within 90 mins (Same-Day UAE Dispatch)',
+        timeline: buildOrderTimeline('order_placed'),
+      };
+      set((state) => {
+        const nextOrders = [newOrder, ...state.recentOrders];
+        const nextIds = Array.from(new Set([newOrder.orderId, ...state.sessionOrderIds]));
+        saveSessionOrdersToStorage(nextOrders);
+        return {
+          items: [],
+          lastOrder: newOrder,
+          recentOrders: nextOrders,
+          sessionOrderIds: nextIds,
+        };
+      });
+      return { success: true, order: newOrder };
+    }
     try {
       // The database recomputes every price from the products table; totals below
       // are what the server actually charged, not what the browser sent.
@@ -916,11 +1051,32 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
     set({ isFetchingOrderHistory: true });
     try {
       const state = get();
+      if (!isSupabaseConfigured) {
+        set((s) => {
+          const merged = mergeSessionOrdersWithFetched(
+            s.recentOrders,
+            INITIAL_SAMPLE_ORDERS
+          );
+          saveSessionOrdersToStorage(merged);
+          return {
+            recentOrders: merged,
+            sessionOrderIds: Array.from(
+              new Set([...s.sessionOrderIds, ...merged.map((o) => o.orderId)])
+            ),
+          };
+        });
+        return;
+      }
+
       let fetched: CustomerOrder[] = [];
 
       // Signed-in customers: their own orders (Row Level Security limits the rows).
       if (state.currentUser) {
-        fetched = await fetchMyOrders(state.catalog, state.currentUser.uid);
+        fetched = await fetchMyOrders(
+          state.catalog,
+          state.currentUser.uid,
+          state.currentUser.email
+        );
       }
       // Guests (and orders placed before signing in): refresh by order number + email.
       const lookups = state.recentOrders
