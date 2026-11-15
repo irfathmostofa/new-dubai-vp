@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Truck,
   Banknote,
+  Tag,
 } from 'lucide-react';
 import {
   Sheet,
@@ -24,6 +25,7 @@ import {
   calculateShippingInfo,
   formatAED,
   getCartItemUnitPrice,
+  NEWSLETTER_DISCOUNT_CODE,
 } from '../utils/storeLogic';
 
 const UAE_EMIRATES = [
@@ -58,9 +60,14 @@ export function CartSheet() {
   const [paymentMethod, setPaymentMethod] = useState<'Cash on Delivery' | 'Card Link on Delivery'>(
     'Cash on Delivery'
   );
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const subtotal = calculateSubtotal(items);
+  const rawSubtotal = calculateSubtotal(items);
+  const discountAmount = appliedPromo === NEWSLETTER_DISCOUNT_CODE ? Math.round(rawSubtotal * 0.15) : 0;
+  const subtotal = Math.max(0, rawSubtotal - discountAmount);
   const totalItems = calculateTotalItems(items);
   const shippingInfo = calculateShippingInfo(subtotal);
   const finalTotal = subtotal + shippingInfo.shippingFee;
@@ -77,14 +84,34 @@ export function CartSheet() {
 
   const handleStartCheckout = () => {
     setFormError(null);
+    if (currentUser) {
+      if (!fullName) setFullName(currentUser.displayName || '');
+      if (!email) setEmail(currentUser.email || '');
+      if (!phone && currentUser.phone) setPhone(currentUser.phone);
+      if (currentUser.emirate) setEmirate(currentUser.emirate);
+    }
     setStep('checkout');
+  };
+
+  const handleApplyPromo = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = promoInput.trim().toUpperCase();
+    if (cleaned === NEWSLETTER_DISCOUNT_CODE) {
+      setAppliedPromo(NEWSLETTER_DISCOUNT_CODE);
+      setPromoMessage('15% VIP discount code (DUBAIKING15) applied.');
+    } else {
+      setPromoMessage('Invalid voucher code. Try DUBAIKING15 for 15% off.');
+    }
   };
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isPlacingOrder) return;
     const contactEmail = (email || currentUser?.email || '').trim();
-    if (!fullName.trim() || !phone.trim() || !address.trim()) {
+    const recipientName = (fullName || currentUser?.displayName || '').trim();
+    const recipientPhone = (phone || currentUser?.phone || '').trim();
+
+    if (!recipientName || !recipientPhone || !address.trim()) {
       setFormError('Please provide your full name, UAE phone number, and delivery address.');
       return;
     }
@@ -95,11 +122,10 @@ export function CartSheet() {
 
     setFormError(null);
     setIsPlacingOrder(true);
-    // The server recomputes all prices; the order only appears once it is saved.
     const result = await placeOrder({
-      fullName: fullName.trim(),
+      fullName: recipientName,
       email: contactEmail,
-      phone: phone.trim(),
+      phone: recipientPhone,
       emirate,
       address: address.trim(),
       paymentMethod,
@@ -129,7 +155,7 @@ export function CartSheet() {
           <SheetDescription>
             {step === 'cart' && 'Dispatched same-day from our Dubai fulfillment center.'}
             {step === 'checkout' && 'Pay cash or card link upon doorstep delivery anywhere in UAE.'}
-            {step === 'confirmed' && 'Your UAE dispatch courier is being assigned.'}
+            {step === 'confirmed' && 'Your UAE dispatch courier has been assigned.'}
           </SheetDescription>
         </SheetHeader>
 
@@ -189,107 +215,149 @@ export function CartSheet() {
                   </button>
                 </div>
               ) : (
-                <ul className="divide-y divide-zinc-200">
-                  {items.map((item) => {
-                    const { product, quantity, selectedVariant } = item;
-                    const itemKey = item.cartItemId || product.id;
-                    const unitPrice = getCartItemUnitPrice(item);
+                <div className="space-y-5">
+                  <ul className="divide-y divide-zinc-200">
+                    {items.map((item) => {
+                      const { product, quantity, selectedVariant } = item;
+                      const itemKey = item.cartItemId || product.id;
+                      const unitPrice = getCartItemUnitPrice(item);
 
-                    return (
-                      <li key={itemKey} className="flex gap-4 py-4 first:pt-0 last:pb-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCartOpen(false);
-                            navigateToProduct(product.id);
-                          }}
-                          className="h-20 w-20 shrink-0 overflow-hidden border border-zinc-200 bg-zinc-100"
-                        >
-                          <img
-                            src={product.image}
-                            alt={product.title}
-                            referrerPolicy="no-referrer"
-                            className="h-full w-full object-cover"
-                          />
-                        </button>
+                      return (
+                        <li key={itemKey} className="flex gap-4 py-4 first:pt-0 last:pb-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCartOpen(false);
+                              navigateToProduct(product.id);
+                            }}
+                            className="h-20 w-20 shrink-0 overflow-hidden border border-zinc-200 bg-zinc-100"
+                          >
+                            <img
+                              src={product.image}
+                              alt={product.title}
+                              referrerPolicy="no-referrer"
+                              className="h-full w-full object-cover"
+                            />
+                          </button>
 
-                        <div className="flex flex-1 flex-col justify-between">
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <h3 className="line-clamp-2 text-xs font-semibold text-zinc-950">
+                          <div className="flex flex-1 flex-col justify-between">
+                            <div>
+                              <div className="flex items-start justify-between gap-2">
+                                <h3 className="line-clamp-2 text-xs font-semibold text-zinc-950">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCartOpen(false);
+                                      navigateToProduct(product.id);
+                                    }}
+                                    className="text-left hover:underline"
+                                  >
+                                    {product.title}
+                                  </button>
+                                </h3>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setCartOpen(false);
-                                    navigateToProduct(product.id);
-                                  }}
-                                  className="text-left hover:underline"
+                                  onClick={() => removeItem(itemKey)}
+                                  aria-label={`Remove ${product.title} from cart`}
+                                  className="text-zinc-400 transition-colors hover:text-red-600 p-1 -mr-1"
                                 >
-                                  {product.title}
+                                  <Trash2 className="h-4 w-4" />
                                 </button>
-                              </h3>
-                              <button
-                                type="button"
-                                onClick={() => removeItem(itemKey)}
-                                aria-label={`Remove ${product.title} from cart`}
-                                className="text-zinc-400 transition-colors hover:text-red-600 p-1 -mr-1"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              </div>
+                              {selectedVariant ? (
+                                <p
+                                  data-testid={`cart-item-variant-${product.id}`}
+                                  className="mt-1 text-[11px] font-medium text-zinc-600"
+                                >
+                                  {selectedVariant.flavor} · {selectedVariant.nicotine} ·{' '}
+                                  <span className="font-semibold text-zinc-900">
+                                    {selectedVariant.packLabel}
+                                  </span>
+                                </p>
+                              ) : (
+                                <p className="mt-0.5 text-xs text-zinc-500">
+                                  {product.brand} · {product.nicotineStrength}
+                                </p>
+                              )}
                             </div>
-                            {selectedVariant ? (
-                              <p
-                                data-testid={`cart-item-variant-${product.id}`}
-                                className="mt-1 text-[11px] font-medium text-zinc-600"
-                              >
-                                {selectedVariant.flavor} · {selectedVariant.nicotine} ·{' '}
-                                <span className="font-semibold text-zinc-900">
-                                  {selectedVariant.packLabel}
+
+                            <div className="mt-3 flex items-center justify-between">
+                              <div className="inline-flex items-center border border-zinc-300 bg-white">
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(itemKey, -1)}
+                                  aria-label={`Decrease quantity of ${product.title}`}
+                                  className="inline-flex h-8 w-8 items-center justify-center text-zinc-700 transition-colors hover:bg-zinc-100"
+                                >
+                                  <Minus className="h-3.5 w-3.5" />
+                                </button>
+                                <span
+                                  data-testid={`cart-qty-${product.id}`}
+                                  className="font-mono-num inline-flex h-8 min-w-8 items-center justify-center px-2 text-xs font-bold text-zinc-950"
+                                >
+                                  {quantity}
                                 </span>
-                              </p>
-                            ) : (
-                              <p className="mt-0.5 text-xs text-zinc-500">
-                                {product.brand} · {product.nicotineStrength}
-                              </p>
-                            )}
-                          </div>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(itemKey, 1)}
+                                  aria-label={`Increase quantity of ${product.title}`}
+                                  className="inline-flex h-8 w-8 items-center justify-center text-zinc-700 transition-colors hover:bg-zinc-100"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
 
-                          <div className="mt-3 flex items-center justify-between">
-                            {/* Quantity Adjustment Buttons (+ / -) */}
-                            <div className="inline-flex items-center border border-zinc-300 bg-white">
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(itemKey, -1)}
-                                aria-label={`Decrease quantity of ${product.title}`}
-                                className="inline-flex h-8 w-8 items-center justify-center text-zinc-700 transition-colors hover:bg-zinc-100"
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                              </button>
-                              <span
-                                data-testid={`cart-qty-${product.id}`}
-                                className="font-mono-num inline-flex h-8 min-w-8 items-center justify-center px-2 text-xs font-bold text-zinc-950"
-                              >
-                                {quantity}
+                              <span className="font-mono-num text-xs font-bold text-zinc-950">
+                                {formatAED(unitPrice * quantity)}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(itemKey, 1)}
-                                aria-label={`Increase quantity of ${product.title}`}
-                                className="inline-flex h-8 w-8 items-center justify-center text-zinc-700 transition-colors hover:bg-zinc-100"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                              </button>
                             </div>
-
-                            <span className="font-mono-num text-xs font-bold text-zinc-950">
-                              {formatAED(unitPrice * quantity)}
-                            </span>
                           </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  {/* VIP Voucher / Promo Code Input */}
+                  <form
+                    onSubmit={handleApplyPromo}
+                    className="border-t border-zinc-200 pt-4 space-y-2"
+                  >
+                    <label
+                      htmlFor="cart-promo-code"
+                      className="flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-zinc-600 uppercase"
+                    >
+                      <Tag className="h-3 w-3 text-zinc-950" />
+                      <span>Promo / VIP Voucher Code</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="cart-promo-code"
+                        data-testid="cart-promo-input"
+                        type="text"
+                        value={promoInput}
+                        onChange={(e) => setPromoInput(e.target.value)}
+                        placeholder="e.g. DUBAIKING15"
+                        className="flex-1 border border-zinc-300 bg-white px-3 py-2 font-mono-num text-xs uppercase text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        data-testid="cart-promo-apply-btn"
+                        className="border border-zinc-950 bg-zinc-950 px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-zinc-800"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    {promoMessage && (
+                      <p
+                        className={`text-[11px] font-medium ${
+                          appliedPromo ? 'text-emerald-700' : 'text-zinc-500'
+                        }`}
+                      >
+                        {promoMessage}
+                      </p>
+                    )}
+                  </form>
+                </div>
               )}
             </>
           )}
@@ -321,7 +389,7 @@ export function CartSheet() {
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Tariq Al Maktoum"
+                  placeholder="Full name for courier handover"
                   className="mt-1.5 w-full border border-zinc-300 bg-white px-3.5 py-2.5 text-sm text-zinc-950 placeholder:text-zinc-400 focus:border-zinc-950 focus:outline-none"
                 />
               </div>
@@ -447,6 +515,14 @@ export function CartSheet() {
                     {lastOrder.address}, {lastOrder.emirate}
                   </p>
                   <p>
+                    <span className="font-semibold text-zinc-950">Courier:</span>{' '}
+                    {lastOrder.courierName}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-zinc-950">Estimated Arrival:</span>{' '}
+                    {lastOrder.estimatedArrival}
+                  </p>
+                  <p>
                     <span className="font-semibold text-zinc-950">Payment:</span>{' '}
                     {lastOrder.paymentMethod}
                   </p>
@@ -475,10 +551,16 @@ export function CartSheet() {
           )}
         </div>
 
-        {/* Sticky Bottom Section with Subtotal and Massive Checkout (Cash on Delivery) Button */}
+        {/* Sticky Bottom Section with Subtotal and Checkout Button */}
         {step !== 'confirmed' && items.length > 0 && (
           <SheetFooter>
             <div className="space-y-2 text-xs">
+              {discountAmount > 0 && (
+                <div className="flex items-center justify-between text-emerald-700 font-semibold">
+                  <span>VIP Discount ({appliedPromo})</span>
+                  <span className="font-mono-num">-{formatAED(discountAmount)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-zinc-600">
                 <span>UAE Courier Shipping</span>
                 <span className="font-mono-num font-semibold text-zinc-900">

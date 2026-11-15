@@ -3,19 +3,15 @@ import {
   CheckCircle2,
   Clock,
   MapPin,
-  Package,
-  Play,
-  Pause,
-  SkipForward,
+  RefreshCw,
   Truck,
   ShieldCheck,
   Radio,
 } from 'lucide-react';
-import { CustomerOrder, OrderStatusStage } from '../types/store';
+import { CustomerOrder } from '../types/store';
 import {
   buildOrderTimeline,
   formatAED,
-  getNextOrderStatus,
   getOrderProgressPercent,
   ORDER_STATUS_SEQUENCE,
 } from '../utils/storeLogic';
@@ -23,49 +19,43 @@ import { useCartStore } from '../store/useCartStore';
 
 interface OrderTrackingTimelineProps {
   selectedOrderId?: string;
+  orders?: CustomerOrder[];
 }
 
-export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimelineProps) {
+export function OrderTrackingTimeline({ selectedOrderId, orders }: OrderTrackingTimelineProps) {
   const recentOrders = useCartStore((state) => state.recentOrders);
-  const updateOrderStatus = useCartStore((state) => state.updateOrderStatus);
+  const fetchSessionOrderHistory = useCartStore((state) => state.fetchSessionOrderHistory);
+  const isFetchingOrderHistory = useCartStore((state) => state.isFetchingOrderHistory);
+
+  const availableOrders = orders !== undefined ? orders : recentOrders;
 
   const [activeOrderId, setActiveOrderId] = useState<string>(
-    selectedOrderId || recentOrders[0]?.orderId || 'VDK-892410'
+    selectedOrderId || availableOrders[0]?.orderId || ''
   );
-  const [isAutoSimulating, setIsAutoSimulating] = useState<boolean>(false);
 
   useEffect(() => {
-    if (selectedOrderId) {
+    if (selectedOrderId && availableOrders.some((o) => o.orderId === selectedOrderId)) {
       setActiveOrderId(selectedOrderId);
-    } else if (recentOrders.length > 0 && !recentOrders.some((o) => o.orderId === activeOrderId)) {
-      setActiveOrderId(recentOrders[0].orderId);
+    } else if (availableOrders.length > 0 && !availableOrders.some((o) => o.orderId === activeOrderId)) {
+      setActiveOrderId(availableOrders[0].orderId);
     }
-  }, [selectedOrderId, recentOrders, activeOrderId]);
+  }, [selectedOrderId, availableOrders, activeOrderId]);
 
   const currentOrder: CustomerOrder | undefined =
-    recentOrders.find((o) => o.orderId === activeOrderId) || recentOrders[0];
-
-  // Auto-advance mock real-time status timeline when live simulation is active
-  useEffect(() => {
-    if (!isAutoSimulating || !currentOrder) return;
-
-    const timer = setInterval(() => {
-      const nextStage = getNextOrderStatus(currentOrder.status);
-      if (nextStage === currentOrder.status) {
-        // Loop back to order_placed if user keeps live simulation running after delivered
-        updateOrderStatus(currentOrder.orderId, 'order_placed');
-      } else {
-        updateOrderStatus(currentOrder.orderId, nextStage);
-      }
-    }, 2400);
-
-    return () => clearInterval(timer);
-  }, [isAutoSimulating, currentOrder, updateOrderStatus]);
+    availableOrders.find((o) => o.orderId === activeOrderId) || availableOrders[0];
 
   if (!currentOrder) {
     return (
-      <div className="border border-zinc-200 bg-zinc-50 p-5 text-center text-xs text-zinc-500">
-        No orders found for live status tracking. Place a Cash on Delivery order to track it in real time.
+      <div
+        data-testid="order-tracking-empty-state"
+        className="border border-zinc-200 bg-zinc-50 p-6 text-center space-y-1.5"
+      >
+        <p className="font-display text-sm font-bold text-zinc-950">
+          Enter Your Order Number Above to Track Live UAE Courier Status
+        </p>
+        <p className="text-xs text-zinc-500 max-w-md mx-auto">
+          Provide your Order ID (found on your checkout confirmation receipt) and email address to view real-time Al Quoz warehouse and bike courier stages.
+        </p>
       </div>
     );
   }
@@ -76,27 +66,15 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
       : buildOrderTimeline(currentOrder.status);
 
   const progressPercent = getOrderProgressPercent(currentOrder.status);
-  const activeStep = timelineSteps.find((s) => s.current) || timelineSteps[timelineSteps.length - 1];
-
-  const handleAdvanceNextStep = () => {
-    const nextStage = getNextOrderStatus(currentOrder.status);
-    if (nextStage === currentOrder.status) {
-      updateOrderStatus(currentOrder.orderId, 'order_placed');
-    } else {
-      updateOrderStatus(currentOrder.orderId, nextStage);
-    }
-  };
-
-  const handleSelectStageDirectly = (stage: OrderStatusStage) => {
-    updateOrderStatus(currentOrder.orderId, stage);
-  };
+  const activeStep =
+    timelineSteps.find((s) => s.current) || timelineSteps[timelineSteps.length - 1];
 
   return (
     <div
       data-testid="order-tracking-timeline"
       className="border border-zinc-200 bg-white"
     >
-      {/* Top Telemetry Header Bar */}
+      {/* Top Dispatch Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-950 px-4 py-3.5 text-white">
         <div className="flex items-center gap-2.5">
           <span className="relative flex h-2.5 w-2.5">
@@ -106,7 +84,7 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono-num text-xs font-bold tracking-wider uppercase">
-                LIVE GPS TELEMETRY · #{currentOrder.orderId}
+                UAE DISPATCH TRACKING · #{currentOrder.orderId}
               </span>
               <span className="bg-emerald-500/20 px-2 py-0.5 font-mono-num text-[10px] font-bold text-emerald-300">
                 {progressPercent}% COMPLETE
@@ -119,24 +97,36 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
           </div>
         </div>
 
-        {/* Order Selector if multiple orders exist */}
-        {recentOrders.length > 1 && (
-          <select
-            aria-label="Select order to track"
-            value={currentOrder.orderId}
-            onChange={(e) => setActiveOrderId(e.target.value)}
-            className="border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono-num text-xs font-semibold text-white focus:outline-none"
+        <div className="flex items-center gap-2">
+          {availableOrders.length > 1 && (
+            <select
+              aria-label="Select order to track"
+              value={currentOrder.orderId}
+              onChange={(e) => setActiveOrderId(e.target.value)}
+              className="border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono-num text-xs font-semibold text-white focus:outline-none"
+            >
+              {availableOrders.map((ord) => (
+                <option key={ord.orderId} value={ord.orderId}>
+                  #{ord.orderId} ({ord.emirate})
+                </option>
+              ))}
+            </select>
+          )}
+
+          <button
+            type="button"
+            data-testid="timeline-refresh-status-btn"
+            disabled={isFetchingOrderHistory}
+            onClick={() => void fetchSessionOrderHistory()}
+            className="inline-flex items-center gap-1.5 border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:border-white disabled:opacity-50"
           >
-            {recentOrders.map((ord) => (
-              <option key={ord.orderId} value={ord.orderId}>
-                #{ord.orderId} ({ord.emirate})
-              </option>
-            ))}
-          </select>
-        )}
+            <RefreshCw className={`h-3 w-3 ${isFetchingOrderHistory ? 'animate-spin' : ''}`} />
+            <span>{isFetchingOrderHistory ? 'Syncing...' : 'Refresh'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Interactive Real-Time Controls & Courier Meta */}
+      {/* Courier Meta & Progress Bar */}
       <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -151,40 +141,9 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-testid="toggle-live-tracking-btn"
-              onClick={() => setIsAutoSimulating((prev) => !prev)}
-              className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
-                isAutoSimulating
-                  ? 'border-emerald-700 bg-emerald-700 text-white'
-                  : 'border-zinc-300 bg-white text-zinc-900 hover:border-zinc-950'
-              }`}
-            >
-              {isAutoSimulating ? (
-                <>
-                  <Pause className="h-3 w-3" />
-                  <span>Pause Live Feed</span>
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3" />
-                  <span>Simulate Real-Time Feed</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              data-testid="advance-order-status-btn"
-              onClick={handleAdvanceNextStep}
-              className="inline-flex items-center gap-1.5 bg-zinc-950 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-zinc-800"
-            >
-              <SkipForward className="h-3 w-3" />
-              <span>Next Status Step</span>
-            </button>
-          </div>
+          <span className="font-mono-num text-[11px] font-semibold text-zinc-500">
+            Destination: {currentOrder.address}, {currentOrder.emirate}
+          </span>
         </div>
 
         {/* Progress Bar */}
@@ -204,7 +163,7 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
         </div>
       </div>
 
-      {/* 5-Stage Interactive Mock Status Timeline */}
+      {/* 5-Stage Authoritative Fulfillment Timeline */}
       <div className="p-4 sm:p-5">
         <ol className="relative space-y-3 before:absolute before:top-3 before:bottom-3 before:left-4 before:w-0.5 before:bg-zinc-200">
           {timelineSteps.map((step, index) => {
@@ -222,16 +181,13 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
                       : 'border-zinc-200 bg-zinc-50 text-zinc-500'
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => handleSelectStageDirectly(step.status)}
-                  title={`Jump to ${step.label}`}
-                  className={`relative z-10 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold transition-colors ${
+                <div
+                  className={`relative z-10 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold ${
                     isCurrent
                       ? 'border-emerald-400 bg-emerald-500 text-zinc-950'
                       : isCompleted
                         ? 'border-zinc-950 bg-zinc-950 text-white'
-                        : 'border-zinc-300 bg-white text-zinc-400 hover:border-zinc-600'
+                        : 'border-zinc-300 bg-white text-zinc-400'
                   }`}
                 >
                   {isCompleted ? (
@@ -239,7 +195,7 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
                   ) : (
                     <span className="font-mono-num text-[10px]">{index + 1}</span>
                   )}
-                </button>
+                </div>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -295,11 +251,10 @@ export function OrderTrackingTimeline({ selectedOrderId }: OrderTrackingTimeline
           })}
         </ol>
 
-        {/* Quick Stage Pills for Instant Testing */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 pt-3 text-[11px]">
           <span className="inline-flex items-center gap-1.5 font-semibold text-zinc-600">
             <ShieldCheck className="h-3.5 w-3.5 text-zinc-950" />
-            <span>Click any milestone above to test courier status transitions</span>
+            <span>ESMA UAE Verified Dispatch · Doorstep Cash or Card Link</span>
           </span>
           <span className="font-mono-num text-zinc-500">
             Stage {ORDER_STATUS_SEQUENCE.indexOf(currentOrder.status) + 1} of{' '}

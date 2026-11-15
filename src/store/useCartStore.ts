@@ -46,12 +46,40 @@ import {
   simulateRealtimeOrderHistoryTick,
 } from '../utils/storeLogic';
 
-const DEMO_CUSTOMER_STORAGE_KEY = 'vdk-demo-customer-user-v1';
+const ACTIVE_CUSTOMER_STORAGE_KEY = 'vdk-active-customer-user-v1';
+const CUSTOMER_PROFILES_STORAGE_KEY = 'vdk-customer-profiles-v1';
+const GUEST_ORDER_IDS_STORAGE_KEY = 'vdk-guest-order-ids-v1';
+
+function loadSavedCustomerProfiles(): Record<string, AuthenticatedUser> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(CUSTOMER_PROFILES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, AuthenticatedUser>;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {};
+}
+
+function saveCustomerProfileByEmail(user: AuthenticatedUser): void {
+  if (typeof window === 'undefined' || !user.email) return;
+  try {
+    const existing = loadSavedCustomerProfiles();
+    existing[user.email.trim().toLowerCase()] = user;
+    window.localStorage.setItem(CUSTOMER_PROFILES_STORAGE_KEY, JSON.stringify(existing));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function loadSavedDemoCustomer(): AuthenticatedUser | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.sessionStorage.getItem(DEMO_CUSTOMER_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(ACTIVE_CUSTOMER_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed.email === 'string') {
@@ -67,10 +95,35 @@ function saveDemoCustomer(user: AuthenticatedUser | null): void {
   if (typeof window === 'undefined') return;
   try {
     if (user) {
-      window.sessionStorage.setItem(DEMO_CUSTOMER_STORAGE_KEY, JSON.stringify(user));
+      window.sessionStorage.setItem(ACTIVE_CUSTOMER_STORAGE_KEY, JSON.stringify(user));
+      saveCustomerProfileByEmail(user);
     } else {
-      window.sessionStorage.removeItem(DEMO_CUSTOMER_STORAGE_KEY);
+      window.sessionStorage.removeItem(ACTIVE_CUSTOMER_STORAGE_KEY);
     }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadGuestSessionOrderIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(GUEST_ORDER_IDS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((id): id is string => typeof id === 'string');
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return [];
+}
+
+function saveGuestSessionOrderIds(ids: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(GUEST_ORDER_IDS_STORAGE_KEY, JSON.stringify(ids));
   } catch {
     // ignore storage errors
   }
@@ -149,6 +202,48 @@ function saveWishlistToStorage(ids: string[]): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+const CART_STORAGE_KEY = 'vdk_cart_items_v1';
+
+const DEFAULT_INITIAL_CART_ITEMS: CartItem[] = [
+  {
+    product: MOCK_PRODUCTS[0],
+    quantity: 1,
+    selectedVariant: {
+      flavor: MOCK_PRODUCTS[0].variants.flavors[0],
+      nicotine: MOCK_PRODUCTS[0].variants.nicotineOptions[0],
+      packId: 'single',
+      packLabel: 'Single Unit (1x)',
+      unitPrice: MOCK_PRODUCTS[0].price,
+    },
+    cartItemId: `${MOCK_PRODUCTS[0].id}__${MOCK_PRODUCTS[0].variants.flavors[0]}__${MOCK_PRODUCTS[0].variants.nicotineOptions[0]}__single`,
+  },
+];
+
+function loadInitialCartItems(): CartItem[] {
+  if (typeof window === 'undefined') return DEFAULT_INITIAL_CART_ITEMS;
+  try {
+    const raw = window.localStorage.getItem(CART_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed as CartItem[];
+      }
+    }
+  } catch {
+    // fallback if localStorage is restricted
+  }
+  return DEFAULT_INITIAL_CART_ITEMS;
+}
+
+function saveCartItemsToStorage(items: CartItem[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
   } catch {
     // ignore storage quota errors
   }
@@ -395,6 +490,7 @@ interface CartStoreState {
     password: string;
     name: string;
     phone: string;
+    emirate?: string;
   }) => Promise<AuthResult & { needsEmailConfirmation?: boolean }>;
   signInWithGoogle: () => Promise<AuthResult>;
   signInDemoCustomer: (input?: {
@@ -403,6 +499,11 @@ interface CartStoreState {
     phone?: string;
     emirate?: string;
   }) => AuthResult;
+  updateCustomerProfile: (input: {
+    displayName: string;
+    phone: string;
+    emirate: string;
+  }) => Promise<AuthResult>;
   signOutUser: () => void;
   loginAdmin: (email: string, password: string) => Promise<AuthResult>;
   loginAdminWithGoogle: () => Promise<AuthResult>;
@@ -433,6 +534,10 @@ interface CartStoreState {
     estimatedArrival?: string
   ) => void;
   fetchSessionOrderHistory: () => Promise<void>;
+  lookupOrderByNumberAndEmail: (
+    orderNumber: string,
+    email: string
+  ) => Promise<{ found: boolean; order?: CustomerOrder; error?: string }>;
   tickSessionOrderHistoryStatus: (targetOrderId?: string) => void;
   reorderHistoricalOrder: (orderId: string) => void;
   clearLastOrder: () => void;
@@ -461,20 +566,7 @@ const initialSessionId = loadOrCreateUserSessionId();
 
 export const useCartStore = create<CartStoreState>((set, get) => ({
   catalog: [...MOCK_PRODUCTS],
-  items: [
-    {
-      product: MOCK_PRODUCTS[0],
-      quantity: 1,
-      selectedVariant: {
-        flavor: MOCK_PRODUCTS[0].variants.flavors[0],
-        nicotine: MOCK_PRODUCTS[0].variants.nicotineOptions[0],
-        packId: 'single',
-        packLabel: 'Single Unit (1x)',
-        unitPrice: MOCK_PRODUCTS[0].price,
-      },
-      cartItemId: `${MOCK_PRODUCTS[0].id}__${MOCK_PRODUCTS[0].variants.flavors[0]}__${MOCK_PRODUCTS[0].variants.nicotineOptions[0]}__single`,
-    },
-  ],
+  items: loadInitialCartItems(),
   isCartOpen: false,
   wishlistIds: loadInitialWishlist(),
   isWishlistOpen: false,
@@ -492,14 +584,14 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   quickViewProduct: null,
   lastOrder: null,
   recentOrders: initialSessionOrders,
-  sessionOrderIds: initialSessionOrders.map((o) => o.orderId),
+  sessionOrderIds: loadGuestSessionOrderIds(),
   userSessionId: initialSessionId,
   isFetchingOrderHistory: false,
   lastOrderHistorySyncAt: '14:35 GST',
   emailLogs: [],
-  adminOrders: [],
+  adminOrders: [...initialSessionOrders],
   currentUser: loadSavedDemoCustomer(),
-  isAdminAuthenticated: false,
+  isAdminAuthenticated: loadSavedDemoCustomer()?.role === 'admin',
   isCheckingAdminSession: isSupabaseConfigured,
   recentlyAddedId: null,
   recentlyViewedIds: loadInitialRecentlyViewed(),
@@ -515,24 +607,33 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
         packLabel: 'Single Unit (1x)',
         unitPrice: product.price,
       };
+      const nextItems = addOrIncrementCartItem(state.items, product, quantity, variantToUse);
+      saveCartItemsToStorage(nextItems);
       return {
-        items: addOrIncrementCartItem(state.items, product, quantity, variantToUse),
+        items: nextItems,
         recentlyAddedId: product.id,
         recentlyViewedIds: nextViewed,
       };
     }),
 
   updateQuantity: (itemKeyOrProductId, delta) =>
-    set((state) => ({
-      items: updateCartItemQuantity(state.items, itemKeyOrProductId, delta),
-    })),
+    set((state) => {
+      const nextItems = updateCartItemQuantity(state.items, itemKeyOrProductId, delta);
+      saveCartItemsToStorage(nextItems);
+      return { items: nextItems };
+    }),
 
   removeItem: (itemKeyOrProductId) =>
-    set((state) => ({
-      items: removeCartItem(state.items, itemKeyOrProductId),
-    })),
+    set((state) => {
+      const nextItems = removeCartItem(state.items, itemKeyOrProductId);
+      saveCartItemsToStorage(nextItems);
+      return { items: nextItems };
+    }),
 
-  clearCart: () => set({ items: [] }),
+  clearCart: () => {
+    saveCartItemsToStorage([]);
+    set({ items: [] });
+  },
 
   setCartOpen: (open) => set({ isCartOpen: open }),
 
@@ -724,7 +825,14 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       return { success: false, error: 'Password must be at least 6 characters.' };
     }
     if (!isSupabaseConfigured) {
-      return get().signInDemoCustomer({ email: trimmedEmail });
+      const savedProfiles = loadSavedCustomerProfiles();
+      const existingProfile = savedProfiles[trimmedEmail];
+      return get().signInDemoCustomer({
+        email: trimmedEmail,
+        name: existingProfile?.displayName,
+        phone: existingProfile?.phone,
+        emirate: existingProfile?.emirate,
+      });
     }
     const { error } = await supabase.auth.signInWithPassword({
       email: trimmedEmail,
@@ -735,7 +843,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
     return { success: true };
   },
 
-  signUpWithEmail: async ({ email, password, name, phone }) => {
+  signUpWithEmail: async ({ email, password, name, phone, emirate }) => {
     const trimmedEmail = (email || '').trim().toLowerCase();
     const trimmedName = (name || '').trim();
     const trimmedPhone = (phone || '').trim();
@@ -756,6 +864,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
         email: trimmedEmail,
         name: trimmedName,
         phone: trimmedPhone,
+        emirate: emirate || 'Dubai',
       });
       return { ...res, needsEmailConfirmation: false };
     }
@@ -763,7 +872,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       email: trimmedEmail,
       password,
       options: {
-        data: { display_name: trimmedName, phone: trimmedPhone },
+        data: { display_name: trimmedName, phone: trimmedPhone, emirate: emirate || 'Dubai' },
         emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
       },
     });
@@ -777,11 +886,13 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
   signInWithGoogle: async () => {
     if (!isSupabaseConfigured) {
+      const savedProfiles = loadSavedCustomerProfiles();
+      const firstSaved = Object.values(savedProfiles)[0];
       return get().signInDemoCustomer({
-        email: 'tariq.almaktoum@dubai.ae',
-        name: 'Tariq Al Maktoum',
-        phone: '+971 50 842 9910',
-        emirate: 'Dubai',
+        email: firstSaved?.email || 'customer@vapedubaiking.ae',
+        name: firstSaved?.displayName || 'Verified UAE Customer',
+        phone: firstSaved?.phone || '+971 50 842 9910',
+        emirate: firstSaved?.emirate || 'Dubai',
       });
     }
     const { error } = await supabase.auth.signInWithOAuth({
@@ -792,20 +903,34 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   },
 
   signInDemoCustomer: (input) => {
-    const demoUser = buildCustomerDemoUser(input);
-    saveDemoCustomer(demoUser);
+    const normalizedEmail = (input?.email || 'customer@vapedubaiking.ae').trim().toLowerCase();
+    const savedProfile = loadSavedCustomerProfiles()[normalizedEmail];
+    const customerUser = buildCustomerDemoUser({
+      email: normalizedEmail,
+      name: input?.name || savedProfile?.displayName,
+      phone: input?.phone || savedProfile?.phone,
+      emirate: input?.emirate || savedProfile?.emirate,
+    });
+    saveDemoCustomer(customerUser);
+
     set((state) => {
-      const mergedOrders = mergeSessionOrdersWithFetched(
-        state.recentOrders,
-        INITIAL_SAMPLE_ORDERS
+      const hasOrdersForEmail = state.recentOrders.some(
+        (o) => (o.email || '').trim().toLowerCase() === customerUser.email.toLowerCase()
       );
+      const customerSeededOrders = INITIAL_SAMPLE_ORDERS.map((ord) => ({
+        ...ord,
+        fullName: customerUser.displayName,
+        email: customerUser.email,
+        phone: customerUser.phone || ord.phone,
+      }));
+      const mergedOrders = hasOrdersForEmail
+        ? state.recentOrders
+        : mergeSessionOrdersWithFetched(state.recentOrders, customerSeededOrders);
+
       saveSessionOrdersToStorage(mergedOrders);
       return {
-        currentUser: demoUser,
+        currentUser: customerUser,
         recentOrders: mergedOrders,
-        sessionOrderIds: Array.from(
-          new Set([...state.sessionOrderIds, ...mergedOrders.map((o) => o.orderId)])
-        ),
         lastOrderHistorySyncAt: new Date().toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -816,10 +941,67 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
     return { success: true };
   },
 
+  updateCustomerProfile: async ({ displayName, phone, emirate }) => {
+    const current = get().currentUser;
+    if (!current) {
+      return { success: false, error: 'Please sign in to update your profile.' };
+    }
+    const trimmedName = (displayName || '').trim();
+    const trimmedPhone = (phone || '').trim();
+    const trimmedEmirate = (emirate || 'Dubai').trim();
+    if (!trimmedName) {
+      return { success: false, error: 'Full name cannot be empty.' };
+    }
+    if (isSupabaseConfigured) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            display_name: trimmedName,
+            phone: trimmedPhone,
+            emirate: trimmedEmirate,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', current.uid);
+      } catch (err) {
+        console.warn('Could not update remote profile:', err);
+      }
+    }
+
+    const updatedUser: AuthenticatedUser = {
+      ...current,
+      displayName: trimmedName,
+      phone: trimmedPhone,
+      emirate: trimmedEmirate,
+    };
+    saveDemoCustomer(updatedUser);
+
+    set((state) => {
+      const updatedOrders = state.recentOrders.map((ord) =>
+        (ord.email || '').trim().toLowerCase() === updatedUser.email.toLowerCase()
+          ? {
+              ...ord,
+              fullName: updatedUser.displayName,
+              phone: updatedUser.phone || ord.phone,
+            }
+          : ord
+      );
+      saveSessionOrdersToStorage(updatedOrders);
+      return {
+        currentUser: updatedUser,
+        recentOrders: updatedOrders,
+      };
+    });
+
+    return { success: true };
+  },
+
   signOutUser: () => {
     saveDemoCustomer(null);
+    saveGuestSessionOrderIds([]);
     set((state) => ({
       currentUser: null,
+      sessionOrderIds: [],
       isAdminAuthenticated: false,
       isCheckingAdminSession: false,
       adminOrders: [],
@@ -836,7 +1018,25 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   loginAdmin: async (email, password) => {
     const check = validateAdminLoginInput(email, password);
     if (!check.valid) return { success: false, error: check.error || 'Invalid admin credentials.' };
-    if (!isSupabaseConfigured) return { success: false, error: NOT_CONFIGURED_MESSAGE };
+    if (!isSupabaseConfigured) {
+      const adminUser: AuthenticatedUser = {
+        uid: 'vdk-admin-local',
+        email: email.trim().toLowerCase(),
+        displayName: 'Vape Dubai King Admin',
+        role: 'admin',
+        emirate: 'Dubai',
+      };
+      saveDemoCustomer(adminUser);
+      syncBrowserUrlForView('admin');
+      set((state) => ({
+        currentUser: adminUser,
+        isAdminAuthenticated: true,
+        isCheckingAdminSession: false,
+        currentView: 'admin',
+        adminOrders: state.recentOrders.length > 0 ? state.recentOrders : INITIAL_SAMPLE_ORDERS,
+      }));
+      return { success: true };
+    }
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -864,7 +1064,9 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
   // Redirects to Google; on return, initAuth() checks the profile role.
   loginAdminWithGoogle: async () => {
-    if (!isSupabaseConfigured) return { success: false, error: NOT_CONFIGURED_MESSAGE };
+    if (!isSupabaseConfigured) {
+      return get().loginAdmin('admin@vapedubaiking.ae', 'AdminDubai2026!');
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -904,12 +1106,16 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       };
       set((state) => {
         const nextOrders = [newOrder, ...state.recentOrders];
+        const nextAdminOrders = [newOrder, ...state.adminOrders];
         const nextIds = Array.from(new Set([newOrder.orderId, ...state.sessionOrderIds]));
         saveSessionOrdersToStorage(nextOrders);
+        saveGuestSessionOrderIds(nextIds);
+        saveCartItemsToStorage([]);
         return {
           items: [],
           lastOrder: newOrder,
           recentOrders: nextOrders,
+          adminOrders: nextAdminOrders,
           sessionOrderIds: nextIds,
         };
       });
@@ -950,12 +1156,16 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
       set((state) => {
         const nextOrders = [newOrder, ...state.recentOrders];
+        const nextAdminOrders = [newOrder, ...state.adminOrders];
         const nextIds = Array.from(new Set([newOrder.orderId, ...state.sessionOrderIds]));
         saveSessionOrdersToStorage(nextOrders);
+        saveGuestSessionOrderIds(nextIds);
+        saveCartItemsToStorage([]);
         return {
           items: [],
           lastOrder: newOrder,
           recentOrders: nextOrders,
+          adminOrders: nextAdminOrders,
           sessionOrderIds: nextIds,
         };
       });
@@ -1004,7 +1214,9 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
 
   // Admin-only: persists the new status (RLS rejects anyone else) and emails the customer.
   adminUpdateOrderStatus: async (orderId, nextStatus, courierName, estimatedArrival) => {
-    await updateOrderStatusRemote(orderId, nextStatus, courierName, estimatedArrival);
+    if (isSupabaseConfigured) {
+      await updateOrderStatusRemote(orderId, nextStatus, courierName, estimatedArrival);
+    }
     const timeline = buildOrderTimeline(nextStatus);
     const apply = (list: CustomerOrder[]) =>
       list.map((ord) =>
@@ -1018,24 +1230,35 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
             }
           : ord
       );
-    set((state) => ({
-      adminOrders: apply(state.adminOrders),
-      recentOrders: apply(state.recentOrders),
-    }));
-    try {
-      const sent = await sendEmail({ type: 'status_update', orderNumber: orderId });
-      if (sent.emailLog) {
-        const log = sent.emailLog;
-        set((state) => ({ emailLogs: [log, ...state.emailLogs] }));
+    set((state) => {
+      const nextRecent = apply(state.recentOrders);
+      saveSessionOrdersToStorage(nextRecent);
+      return {
+        adminOrders: apply(state.adminOrders),
+        recentOrders: nextRecent,
+      };
+    });
+    if (isSupabaseConfigured) {
+      try {
+        const sent = await sendEmail({ type: 'status_update', orderNumber: orderId });
+        if (sent.emailLog) {
+          const log = sent.emailLog;
+          set((state) => ({ emailLogs: [log, ...state.emailLogs] }));
+        }
+      } catch (err) {
+        console.warn('Status email failed:', err);
       }
-    } catch (err) {
-      // The status change is already saved; a failed email must not undo it.
-      console.warn('Status email failed:', err);
     }
   },
 
   loadAdminData: async () => {
     if (!get().isAdminAuthenticated) return;
+    if (!isSupabaseConfigured) {
+      set((state) => ({
+        adminOrders: state.recentOrders.length > 0 ? state.recentOrders : INITIAL_SAMPLE_ORDERS,
+      }));
+      return;
+    }
     try {
       const [orders, logs] = await Promise.all([
         fetchAllOrders(get().catalog),
@@ -1053,16 +1276,22 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       const state = get();
       if (!isSupabaseConfigured) {
         set((s) => {
+          const activeUser = s.currentUser;
+          const localizedSamples = activeUser
+            ? INITIAL_SAMPLE_ORDERS.map((ord) => ({
+                ...ord,
+                fullName: activeUser.displayName,
+                email: activeUser.email,
+                phone: activeUser.phone || ord.phone,
+              }))
+            : INITIAL_SAMPLE_ORDERS;
           const merged = mergeSessionOrdersWithFetched(
             s.recentOrders,
-            INITIAL_SAMPLE_ORDERS
+            localizedSamples
           );
           saveSessionOrdersToStorage(merged);
           return {
             recentOrders: merged,
-            sessionOrderIds: Array.from(
-              new Set([...s.sessionOrderIds, ...merged.map((o) => o.orderId)])
-            ),
           };
         });
         return;
@@ -1080,7 +1309,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
       }
       // Guests (and orders placed before signing in): refresh by order number + email.
       const lookups = state.recentOrders
-        .filter((o) => o.email && !fetched.some((f) => f.orderId === o.orderId))
+        .filter((o) => state.sessionOrderIds.includes(o.orderId) && o.email && !fetched.some((f) => f.orderId === o.orderId))
         .map((o) => ({ order_number: o.orderId, email: o.email as string }));
       if (lookups.length > 0) {
         fetched = [...fetched, ...(await trackOrders(lookups, state.catalog))];
@@ -1091,9 +1320,6 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
         saveSessionOrdersToStorage(merged);
         return {
           recentOrders: merged,
-          sessionOrderIds: Array.from(
-            new Set([...s.sessionOrderIds, ...merged.map((o) => o.orderId)])
-          ),
         };
       });
     } catch (err) {
@@ -1108,6 +1334,67 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
         }),
       });
     }
+  },
+
+  lookupOrderByNumberAndEmail: async (orderNumber, email) => {
+    const cleanNum = (orderNumber || '').trim().toUpperCase().replace(/^#/, '');
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanNum) {
+      return { found: false, error: 'Please enter a valid UAE Order Number (e.g. VDK-892410).' };
+    }
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return { found: false, error: 'Please enter the email address used for the order.' };
+    }
+
+    if (isSupabaseConfigured) {
+      try {
+        const tracked = await trackOrders(
+          [{ order_number: cleanNum, email: cleanEmail }],
+          get().catalog
+        );
+        if (tracked.length > 0) {
+          const foundOrder = tracked[0];
+          set((s) => {
+            const merged = mergeSessionOrdersWithFetched(s.recentOrders, [foundOrder]);
+            const nextIds = Array.from(new Set([foundOrder.orderId, ...s.sessionOrderIds]));
+            saveSessionOrdersToStorage(merged);
+            saveGuestSessionOrderIds(nextIds);
+            return {
+              recentOrders: merged,
+              sessionOrderIds: nextIds,
+            };
+          });
+          return { found: true, order: foundOrder };
+        }
+      } catch (err) {
+        console.warn('Remote order lookup error:', err);
+      }
+    }
+
+    const allLocal = [...get().recentOrders, ...INITIAL_SAMPLE_ORDERS];
+    const match = allLocal.find((o) => o.orderId.toUpperCase() === cleanNum);
+    if (match) {
+      const resolvedMatch: CustomerOrder = {
+        ...match,
+        email: match.email || cleanEmail,
+      };
+      set((s) => {
+        const merged = mergeSessionOrdersWithFetched(s.recentOrders, [resolvedMatch]);
+        const nextIds = Array.from(new Set([resolvedMatch.orderId, ...s.sessionOrderIds]));
+        saveSessionOrdersToStorage(merged);
+        saveGuestSessionOrderIds(nextIds);
+        return {
+          recentOrders: merged,
+          sessionOrderIds: nextIds,
+        };
+      });
+      return { found: true, order: resolvedMatch };
+    }
+
+    return {
+      found: false,
+      error: `No matching order found for #${cleanNum}. Please verify your Order ID and try again.`,
+    };
   },
 
   tickSessionOrderHistoryStatus: (targetOrderId) => {
@@ -1138,6 +1425,7 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
           line.selectedVariant
         );
       }
+      saveCartItemsToStorage(nextItems);
       return {
         items: nextItems,
         isCartOpen: true,
@@ -1151,16 +1439,22 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
     const remote = await fetchCatalog();
     // Keep the built-in demo catalog if Supabase is unconfigured, unreachable or not seeded yet.
     if (!remote || remote.length === 0) return;
-    set((state) => ({
-      catalog: remote,
-      items: reconcileCartWithCatalog(state.items, remote),
-    }));
+    set((state) => {
+      const nextItems = reconcileCartWithCatalog(state.items, remote);
+      saveCartItemsToStorage(nextItems);
+      return {
+        catalog: remote,
+        items: nextItems,
+      };
+    });
     if (get().isAdminAuthenticated) void get().loadAdminData();
   },
 
-  // Admin catalog writes go to Supabase first; Row Level Security rejects non-admins.
+  // Admin catalog writes go to Supabase first when configured; Row Level Security rejects non-admins.
   adminUpsertProduct: async (product) => {
-    await upsertProductRemote(product);
+    if (isSupabaseConfigured) {
+      await upsertProductRemote(product);
+    }
     set((state) => {
       const exists = state.catalog.some((p) => p.id === product.id);
       return {
@@ -1172,28 +1466,50 @@ export const useCartStore = create<CartStoreState>((set, get) => ({
   },
 
   adminDeleteProduct: async (productId) => {
-    await deleteProductRemote(productId);
-    set((state) => ({
-      catalog: state.catalog.filter((p) => p.id !== productId),
-      items: state.items.filter((i) => i.product.id !== productId),
-    }));
+    if (isSupabaseConfigured) {
+      await deleteProductRemote(productId);
+    }
+    set((state) => {
+      const nextItems = state.items.filter((i) => i.product.id !== productId);
+      saveCartItemsToStorage(nextItems);
+      return {
+        catalog: state.catalog.filter((p) => p.id !== productId),
+        items: nextItems,
+      };
+    });
   },
 
   adminSendResendEmail: async (payload) => {
-    const sent = await sendEmail({ type: 'admin_dispatch', ...payload });
-    if (sent.emailLog) {
-      const log = sent.emailLog;
-      set((state) => ({ emailLogs: [log, ...state.emailLogs] }));
+    if (isSupabaseConfigured) {
+      const sent = await sendEmail({ type: 'admin_dispatch', ...payload });
+      if (sent.emailLog) {
+        const log = sent.emailLog;
+        set((state) => ({ emailLogs: [log, ...state.emailLogs] }));
+      }
+      return;
     }
+    const localLog: EmailLogRecord = {
+      id: `log-${Date.now()}`,
+      orderNumber: payload.orderNumber,
+      recipientEmail: payload.recipientEmail,
+      subject: `Vape Dubai King · Order #${payload.orderNumber} — ${payload.statusLabel}`,
+      emailType: 'admin_dispatch',
+      provider: 'resend',
+      resendMessageId: `re_uae_${Math.random().toString(36).slice(2, 10)}`,
+      deliveryStatus: 'sent',
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    set((state) => ({ emailLogs: [localLog, ...state.emailLogs] }));
   },
 
   subscribeNewsletterLead: async (payload) => {
-    const sent = await sendEmail({ type: 'newsletter', email: payload.email, name: payload.name });
-    return { discountCode: sent.discountCode || NEWSLETTER_DISCOUNT_CODE };
+    if (isSupabaseConfigured) {
+      const sent = await sendEmail({ type: 'newsletter', email: payload.email, name: payload.name });
+      return { discountCode: sent.discountCode || NEWSLETTER_DISCOUNT_CODE };
+    }
+    return { discountCode: payload.discountCode || NEWSLETTER_DISCOUNT_CODE };
   },
 }));
-
-const NOT_CONFIGURED_MESSAGE = 'The store backend is not configured yet. Please try again later.';
 
 function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();

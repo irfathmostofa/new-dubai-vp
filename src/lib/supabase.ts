@@ -20,16 +20,9 @@ function hasValidSupabaseEnv(candidateUrl: string, candidateKey: string): boolea
   return lowerUrl.startsWith('https://') || lowerUrl.startsWith('http://');
 }
 
-/** False when the .env values are missing or placeholders: the storefront then runs on built-in demo data. */
 export const isSupabaseConfigured = hasValidSupabaseEnv(rawUrl, rawAnonKey);
 const url = isSupabaseConfigured ? rawUrl : '';
 const anonKey = isSupabaseConfigured ? rawAnonKey : '';
-
-if (!isSupabaseConfigured && typeof console !== 'undefined') {
-  console.info(
-    '[supabase] Running on built-in UAE demo catalog & seeded order state (connect VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY for live cloud persistence).'
-  );
-}
 
 // The anon key is designed to be public: Row Level Security protects the data.
 export const supabase = createClient(

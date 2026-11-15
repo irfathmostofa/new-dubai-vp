@@ -396,6 +396,15 @@ test('session-linked Order History helpers filter, merge, and advance real-time 
     },
   ];
 
+  // Unauthenticated guest with no sessionOrderIds sees 0 orders
+  const guestEmpty = filterOrdersForUserSession(sampleOrders, null, []);
+  assert.equal(guestEmpty.length, 0);
+
+  // Unauthenticated guest who placed or looked up an order sees only that order
+  const guestWithLookup = filterOrdersForUserSession(sampleOrders, null, ['VDK-891855']);
+  assert.equal(guestWithLookup.length, 1);
+  assert.equal(guestWithLookup[0].orderId, 'VDK-891855');
+
   // Filter for signed-in user session
   const tariqOrders = filterOrdersForUserSession(
     sampleOrders,

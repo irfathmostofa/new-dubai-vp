@@ -705,7 +705,7 @@ export function filterOrdersForUserSession(
   if (currentUser) {
     const normalizedEmail = (currentUser.email || '').trim().toLowerCase();
     const normalizedPhone = (currentUser.phone || '').replace(/\s+/g, '');
-    const matched = orders.filter((order) => {
+    return orders.filter((order) => {
       const orderEmail = (order.email || '').trim().toLowerCase();
       const orderPhone = (order.phone || '').replace(/\s+/g, '');
       return (
@@ -714,15 +714,13 @@ export function filterOrdersForUserSession(
         sessionSet.has(order.orderId)
       );
     });
-    return matched.length > 0 ? matched : orders;
   }
 
   if (sessionSet.size > 0) {
-    const matchedSession = orders.filter((o) => sessionSet.has(o.orderId));
-    return matchedSession.length > 0 ? matchedSession : orders;
+    return orders.filter((o) => sessionSet.has(o.orderId));
   }
 
-  return orders;
+  return [];
 }
 
 /**
