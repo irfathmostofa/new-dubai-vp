@@ -1,0 +1,6 @@
+{
+  "name": "Vape Dubai King — Premier UAE Online Vape Store",
+  "description": "Minimalist high-contrast e-commerce storefront for Vape Dubai King featuring disposable vapes, pod systems, e-liquids, vape kits, and same-day UAE Cash on Delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
